@@ -1,0 +1,86 @@
+# Test configuration — overrides src/main/resources/application.yml for all tests.
+# Requires: docker-compose up -d  (starts finguard-postgres on localhost:5432)
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/finguard_test
+    username: finguard
+    password: finguard_dev
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate        # Liquibase manages schema; Hibernate only validates
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yml
+    enabled: true
+
+  # Exclude Spring AI auto-configurations that conflict with MockAiConfig.
+  # PgVectorStoreAutoConfiguration registers 'vectorStore' before @Import-ed TestConfiguration
+  # beans are processed, causing BeanDefinitionOverrideException.
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
+      - org.springframework.ai.autoconfigure.ollama.OllamaAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration
+      - org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration
+
+  # Disable Spring AI components — no Ollama or pgvector needed in tests.
+  # MockAiConfig provides mock beans for ChatModel, ChatClient, EmbeddingModel, VectorStore.
+  ai:
+    ollama:
+      base-url: http://localhost:0  # Prevent real connection attempts to Ollama
+      init:
+        pull-model-strategy: never
+      chat:
+        enabled: false
+      embedding:
+        enabled: false
+    vectorstore:
+      pgvector:
+        enabled: false
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,caches
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+finguard:
+  encryption:
+    key: ZmluZ3VhcmQtZGV2LW9ubHktbm90LWZvci1wcm9kISE=
+  ingestion:
+    batch-size: 100
+  detection:
+    rules:
+      large-transaction-threshold: 200000.00
+      rapid-succession-window-hours: 1
+      rapid-succession-count: 3
+      structuring-threshold: 10000.00
+      new-receiver-high-value-threshold: 50000.00
+    ml:
+      risk-score-threshold: 0.5
+      ensemble-enabled: true
+  explanation:
+    max-rag-results: 5
+    confidence-threshold: 0.6

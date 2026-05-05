@@ -1,0 +1,106 @@
+# =================================================================
+# FinGuard benchmark profile
+# =================================================================
+#
+# Activate with:
+#   mvn spring-boot:run \
+#     -Dspring-boot.run.jvmArguments="-Xmx8g -Xms2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 \
+#        -Dspring.devtools.restart.enabled=false \
+#        -Dspring.devtools.livereload.enabled=false \
+#        -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/finguard-oom.hprof" \
+#     -Dspring-boot.run.profiles=benchmark
+#
+# What it changes vs. default:
+#   - Disables MetricSnapshotRefresher (no per-minute COUNT(*) during eval)
+#   - Tightens cache TTLs (RAG cache rebuilt more often = smaller live set)
+#   - Reduces LLM concurrency to safer Ollama-friendly defaults
+#   - Slashes DevTools overhead (inline + explicit flag)
+#   - Lowers AUC sample size to 10k (OOM-safe on -Xmx8g)
+#
+# What it does NOT change:
+#   - DB, ML, thread-pool sizing (same beans as default)
+#   - Metric endpoints / Prometheus (still exposed for heap watching)
+#
+# =================================================================
+spring:
+  devtools:
+    restart:
+      enabled: false
+    livereload:
+      enabled: false
+    add-properties: false
+
+  # During a benchmark, Hibernate's second-level cache is net-negative — every
+  # write invalidates more than it saves. Use the minimum Hibernate query-plan
+  # cache to keep heap pressure predictable.
+  jpa:
+    properties:
+      hibernate:
+        query:
+          plan_cache_max_size: 512
+          plan_parameter_metadata_max_size: 64
+        default_batch_fetch_size: 32
+
+# Conservative finguard settings — tuned for "I am running overnight, do not
+# crash" rather than "dashboard feels snappy". Override any of these with
+# command-line -D flags if a specific run needs more headroom.
+finguard:
+  cache:
+    enabled: true
+  retry:
+    enabled: true
+
+  ingestion:
+    # Bigger cursor batch = fewer DB round-trips during CSV import + detection.
+    # 50 000 × ~8 KB per row (tx + features) ≈ 400 MB peak per batch — fine on
+    # -Xmx8g (≈5% of heap). Cuts detection pipeline round-trips by 10× vs
+    # the original 5 000 default.
+    batch-size: 50000
+
+  detection:
+    # 4 000 000 covers the pathological PaySim rule-over-triggering case
+    # (~3.5 M alerts per config on the default NEW_RECEIVER_HIGH_VALUE threshold).
+    # If you tune the rule thresholds per §0.3c of THESIS_EVALUATION_GUIDE.md
+    # you can drop this back to 500 000.
+    max-alerts-per-config: 4000000
+    # JDBC bulk-insert path: ~8× faster than JPA saveAll at millions-of-rows scale.
+    persist-via-jdbc: true
+    # Larger persist batch (default 2 000) further amortises pgjdbc's per-call
+    # overhead. Safe at any heap because we drain after each batch.
+    persist-batch-size: 5000
+
+  evaluation:
+    cakr:
+      # Claude: 8 is fine. Ollama: drop to 2 by overriding here.
+      outer-concurrency: 8
+    auc:
+      # 10k legit + ~1.6k fraud on PaySim → ~11k sample → stable AUC estimate.
+      legit-sample-size: 10000
+
+  explanation:
+    # Cloud LLM benchmark default: 16 concurrent requests.
+    #   - Anthropic tier 1 (50 RPM) → drop to 8
+    #   - Anthropic tier 2+ (1 000+ RPM) → 32-48 is comfortable
+    #   - DeepSeek (community backend, CloudFront-fronted) → 16 is the SAFE
+    #     sweet spot. We previously tried 48 and observed cascading CloudFront
+    #     504s: too many concurrent requests overload DeepSeek's backend, the
+    #     CloudFront edge timeout (~60 s) fires before the upstream responds,
+    #     and Spring AI's stacked retry layers turn the LLM phase into a
+    #     queue of stuck requests. 16 keeps the backend within capacity.
+    #   - Ollama (local) → drop to 4 (OLLAMA_NUM_PARALLEL default per model)
+    # If you see 429s OR repeated 504 Gateway Timeouts, halve this value.
+    batch-concurrency: 16
+
+  heap:
+    warn-threshold: 0.75
+    critical-threshold: 0.90
+
+# Crank log levels down on the hottest packages so a 4 h benchmark
+# doesn't flood 500 MB of INFO lines to disk.
+logging:
+  level:
+    root: INFO
+    dev.finguard.dashboard.service.MetricSnapshotRefresher: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+    org.springframework.boot.devtools: ERROR

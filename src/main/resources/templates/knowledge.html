@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Knowledge Base')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="bi bi-book me-2"></i>Knowledge Base</h1>
+        <p>Fraud pattern library that powers RAG-augmented LLM explanations</p>
+    </div>
+
+    <!-- ===== What is this? Banner ===== -->
+    <div class="kb-hero mb-4">
+        <div class="row align-items-center g-3">
+            <div class="col-auto">
+                <div class="kb-hero-icon">
+                    <i class="bi bi-diagram-3-fill"></i>
+                </div>
+            </div>
+            <div class="col">
+                <div class="fw-semibold mb-1" style="color:var(--fg-primary-h);font-size:0.95rem">
+                    How the RAG Pipeline Works
+                </div>
+                <div style="font-size:0.85rem;color:var(--fg-muted);line-height:1.6">
+                    When the LLM generates an explanation for a fraud alert, it first retrieves the most
+                    relevant fraud patterns from this knowledge base via
+                    <strong style="color:var(--fg-text)">semantic vector search</strong> (pgvector + HNSW).
+                    These patterns are injected into the prompt as expert context, helping the model produce
+                    accurate, regulation-grounded explanations instead of hallucinating generic risk language.
+                </div>
+                <div class="d-flex gap-3 mt-2" style="font-size:0.78rem">
+                    <span style="color:var(--fg-muted)"><i class="bi bi-1-circle me-1" style="color:var(--fg-primary-h)"></i>Alert detected</span>
+                    <i class="bi bi-arrow-right text-muted"></i>
+                    <span style="color:var(--fg-muted)"><i class="bi bi-2-circle me-1" style="color:var(--fg-primary-h)"></i>Retrieve top-<em th:text="${@environment.getProperty('finguard.explanation.max-rag-results', '5')}">5</em> matching patterns</span>
+                    <i class="bi bi-arrow-right text-muted"></i>
+                    <span style="color:var(--fg-muted)"><i class="bi bi-3-circle me-1" style="color:var(--fg-primary-h)"></i>Inject context into LLM prompt</span>
+                    <i class="bi bi-arrow-right text-muted"></i>
+                    <span style="color:var(--fg-muted)"><i class="bi bi-4-circle me-1" style="color:var(--fg-primary-h)"></i>Grounded explanation generated</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <!-- Seed Action Card -->
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-database-add" style="color:var(--fg-primary-h)"></i>
+                    <span>Seed Knowledge Base</span>
+                </div>
+                <div class="card-body d-flex flex-column">
+                    <p style="font-size:0.87rem" class="text-muted mb-3">
+                        Populates the database with <strong style="color:var(--fg-text)">pre-defined fraud typologies</strong>
+                        (structuring, velocity anomalies, money laundering patterns, etc.) and
+                        <strong style="color:var(--fg-text)">computes their vector embeddings</strong> so they
+                        can be retrieved semantically at inference time.
+                    </p>
+                    <div class="kb-info-row mb-3">
+                        <i class="bi bi-check-circle-fill" style="color:var(--fg-success)"></i>
+                        <span>Idempotent — safe to run multiple times, skips existing patterns</span>
+                    </div>
+                    <div class="kb-info-row mb-3">
+                        <i class="bi bi-cpu-fill" style="color:var(--fg-info)"></i>
+                        <span>Calls Ollama's <code>nomic-embed-text</code> model for embedding — requires Ollama running</span>
+                    </div>
+                    <div class="kb-info-row mb-4">
+                        <i class="bi bi-exclamation-triangle-fill" style="color:var(--fg-warning)"></i>
+                        <span>Required before running <strong style="color:var(--fg-text)">ML_LLM_RAG</strong> or <strong style="color:var(--fg-text)">FULL_SYSTEM</strong> detection</span>
+                    </div>
+
+                    <div class="mt-auto">
+                        <button class="btn btn-primary w-100" id="seedBtn">
+                            <i class="bi bi-database-add me-2"></i>
+                            <span th:text="${patternCount > 0} ? 'Re-Seed Knowledge Base' : 'Seed Knowledge Base'">Seed Knowledge Base</span>
+                        </button>
+                        <div class="d-flex align-items-center gap-2 mt-2" id="seedSpinner" style="display:none !important">
+                            <span class="spinner-border spinner-border-sm text-primary"></span>
+                            <span class="text-muted" style="font-size:0.85rem">Generating embeddings, please wait…</span>
+                        </div>
+                        <div id="seedResult" class="result-panel mt-2" style="display:none;font-size:0.88rem"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Column -->
+        <div class="col-lg-7">
+            <div class="row g-3 h-100">
+                <div class="col-12">
+                    <div class="stat-card">
+                        <div class="stat-icon info"><i class="bi bi-collection"></i></div>
+                        <div>
+                            <div class="stat-value" th:text="${patternCount}">0</div>
+                            <div class="stat-label">Fraud Patterns in Knowledge Base</div>
+                        </div>
+                        <div class="ms-auto">
+                            <span th:if="${patternCount == 0}" class="kb-status kb-status--empty">
+                                <i class="bi bi-x-circle me-1"></i>Not seeded — RAG unavailable
+                            </span>
+                            <span th:if="${patternCount > 0}" class="kb-status kb-status--ready">
+                                <i class="bi bi-check-circle me-1"></i>RAG ready
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12" th:if="${patternCount > 0}">
+                    <div class="card">
+                        <div class="card-body py-2 px-3">
+                            <div class="section-label mb-2">
+                                <i class="bi bi-tags"></i>
+                                <span>Pattern Types</span>
+                                <span class="section-label__hint"
+                                      th:text="'— ' + ${uniquePatternTypes.size()} + ' unique'">— 0 unique</span>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                                <!-- Server-computed uniques — no JS dedup hack needed -->
+                                <span th:each="t : ${uniquePatternTypes}"
+                                      class="badge kb-type-badge" th:text="${t}">TYPE</span>
+                            </div>
+                            <div class="mt-2 text-muted" style="font-size:0.8rem">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Vector embeddings stored in pgvector with
+                                <strong style="color:var(--fg-text)">768-dimensional</strong>
+                                nomic-embed-text, indexed via HNSW for fast cosine similarity search.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12" th:if="${patternCount == 0}">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="empty-state">
+                                <div class="empty-state__icon"><i class="bi bi-database-slash"></i></div>
+                                <div class="empty-state__title">Knowledge base is empty</div>
+                                <div class="empty-state__hint">
+                                    Click "Seed Knowledge Base" to populate it with fraud typologies —
+                                    required before running ML_LLM_RAG or FULL_SYSTEM detection.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Detection Rule Thresholds                                     -->
+    <!-- ============================================================ -->
+    <section class="mb-4" id="ruleThresholds" th:if="${ruleThresholds != null}">
+        <div class="card">
+            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span><i class="bi bi-sliders me-2"></i>Detection Rule Thresholds</span>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="small text-muted d-none d-md-inline">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Used by <strong>RULES_ONLY</strong>, <strong>FULL_SYSTEM</strong>
+                    </span>
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="resetAllRulesBtn"
+                            title="Reset every rule to its thesis-calibrated default.">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Reset all to thesis defaults
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Transparency banner: why these values -->
+                <div class="rule-transparency mb-3">
+                    <i class="bi bi-book-half rule-transparency__icon"></i>
+                    <div>
+                        <strong>Transparency note for thesis reviewers.</strong>
+                        Rule-based AML systems use numeric thresholds that vary widely across
+                        deployments. The values below are <strong>thesis-calibrated defaults</strong> —
+                        chosen so the RULES_ONLY baseline flags ~1–5&thinsp;% of transactions on
+                        PaySim, matching the industry-reported false-positive range
+                        (Gartner&nbsp;2021; ACAMS&nbsp;2022). The paper defaults and published
+                        industry range are shown side-by-side so you can verify the calibration,
+                        and every threshold is <strong>editable</strong> in case you want to
+                        explore a different operating point. See §4.5 of the thesis for the
+                        full calibration methodology.
+                    </div>
+                </div>
+
+                <!-- Cards — one per rule. Easier to scan than a dense table and
+                     each card stacks cleanly on mobile. -->
+                <div class="rule-grid" id="rule-thresholds-table">
+                    <article class="rule-card" th:each="r : ${ruleThresholds}" th:data-rule="${r.ruleName}">
+                        <header class="rule-card__header">
+                            <h3 class="rule-card__title" th:text="${r.humanName}">Rule name</h3>
+                            <div class="rule-card__desc" th:text="${r.description}">Description</div>
+                        </header>
+
+                        <!-- Three comparison tiles: paper · thesis · industry range -->
+                        <div class="rule-values">
+                            <div class="rule-value rule-value--paper"
+                                 title="The default the original FinGuard paper shipped with.">
+                                <span class="rule-value__label">Paper default</span>
+                                <span class="rule-value__num" th:text="${r.paperDefaultDisplay}">$200,000</span>
+                            </div>
+                            <div class="rule-value rule-value--thesis"
+                                 title="Calibrated for PaySim — see §4.5 of the thesis.">
+                                <span class="rule-value__label">Thesis default</span>
+                                <span class="rule-value__num" th:text="${r.thesisDefaultDisplay}">$1,000,000</span>
+                            </div>
+                            <div class="rule-value rule-value--industry"
+                                 title="Published range seen across real-world bank deployments.">
+                                <span class="rule-value__label">Industry range</span>
+                                <span class="rule-value__num">
+                                    <span th:text="${r.industryMinimumDisplay}">$10,000</span>
+                                    <span class="rule-value__dash">–</span>
+                                    <span th:text="${r.industryMaximumDisplay}">$10,000,000</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Editable current value + status -->
+                        <div class="rule-current">
+                            <label class="rule-current__label">Current value</label>
+                            <div class="input-group rule-current__group">
+                                <span class="input-group-text rule-current__prefix"
+                                      th:text="${r.unit == 'USD' ? '$' : ''}">$</span>
+                                <input type="number" step="1" min="0"
+                                       class="form-control rule-value-input"
+                                       th:value="${r.currentValueInputRaw}"
+                                       th:attr="data-original=${r.currentValueInputRaw},data-thesis-default=${r.thesisDefault}">
+                                <span class="input-group-text rule-current__unit"
+                                      th:if="${r.unit != 'USD'}"
+                                      th:text="${r.unit}">unit</span>
+                                <button type="button" class="btn btn-primary rule-save-btn"
+                                        title="Save this value (takes effect on the next rule evaluation)">
+                                    <i class="bi bi-save me-1"></i>Save
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary rule-reset-btn"
+                                        th:data-thesis-default="${r.currentValueInputRaw != null ? r.thesisDefault.toPlainString() : ''}"
+                                        title="Reset to thesis default">
+                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                </button>
+                            </div>
+
+                            <div class="rule-status">
+                                <span class="rule-badge rule-badge--ok"
+                                      th:if="${r.isAtThesisDefault}">
+                                    <i class="bi bi-check2-circle"></i>At thesis default
+                                </span>
+                                <span class="rule-badge rule-badge--edited"
+                                      th:if="${!r.isAtThesisDefault && !r.isOutsideIndustryRange}">
+                                    <i class="bi bi-pencil-fill"></i>Customised
+                                </span>
+                                <span class="rule-badge rule-badge--warn"
+                                      th:if="${r.isOutsideIndustryRange}"
+                                      title="Current value sits outside the published industry range. Allowed — but surfaced here so reviewers see it.">
+                                    <i class="bi bi-exclamation-triangle-fill"></i>Outside industry range
+                                </span>
+                            </div>
+                        </div>
+
+                        <footer class="rule-card__footer">
+                            <div class="rule-citation">
+                                <i class="bi bi-journal-bookmark"></i>
+                                <span th:text="${r.citation}">Source</span>
+                            </div>
+                            <a href="#" class="rule-why-link rule-rationale-toggle" tabindex="0"
+                               th:data-rationale="${r.rationale}"
+                               th:data-human-name="${r.humanName}">
+                                Why this value? <i class="bi bi-arrow-right"></i>
+                            </a>
+                        </footer>
+                    </article>
+                </div>
+
+                <div id="ruleThresholdsFeedback" class="mt-3" aria-live="polite"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Rationale modal — one-click "why this value?" popup per rule -->
+    <div class="modal fade" id="ruleRationaleModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-info-circle me-2"></i><span id="rationaleModalTitle">Rule</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="rationaleModalBody" style="line-height:1.7">Rationale</div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Full-description modal (populated on row click) -->
+    <div class="modal fade" id="patternModal" tabindex="-1" aria-labelledby="patternModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="patternModalLabel">
+                        <i class="bi bi-book me-2"></i>
+                        <span id="patternModalTitle">Fraud pattern</span>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <span class="badge kb-type-badge" id="patternModalType">TYPE</span>
+                        <span class="text-muted small ms-2" id="patternModalReg"></span>
+                    </div>
+                    <h6 class="section-label mb-2">
+                        <i class="bi bi-file-text"></i><span>Full description</span>
+                    </h6>
+                    <p id="patternModalDescription" style="white-space:pre-wrap;line-height:1.6;color:var(--fg-text);">
+                        Description goes here
+                    </p>
+                    <div class="mt-3 text-muted small" id="patternModalSource"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Patterns Table -->
+    <div class="card" th:if="${!patterns.isEmpty()}">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-list-ul me-2"></i>Loaded Patterns</span>
+            <span class="badge bg-secondary" th:text="${patternCount} + ' entries'">0 entries</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Title</th>
+                        <th>Description</th>
+                        <th>Regulatory Ref</th>
+                        <th>Source</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="p : ${patterns}">
+                        <td>
+                            <span class="badge kb-type-badge" th:text="${p.patternType}">TYPE</span>
+                        </td>
+                        <td class="fw-semibold kb-title-cell" th:text="${p.title}">Title</td>
+                        <!-- Truncated cell with two escape hatches:
+                               1. Native title attribute → hover tooltip with full text
+                               2. Click the cell → opens a styled modal with the full pattern
+                             The existing abbreviation stays for compact table layout. -->
+                        <td class="text-muted kb-desc-cell"
+                            th:attr="data-full-title=${p.title},
+                                     data-full-description=${p.description},
+                                     data-type=${p.patternType},
+                                     data-reg=${p.regulatoryReference ?: ''},
+                                     data-source=${p.source ?: ''}"
+                            th:title="${p.description}"
+                            role="button" tabindex="0">
+                            <span th:text="${#strings.abbreviate(p.description, 90)}">Description</span>
+                            <i class="bi bi-arrows-angle-expand kb-expand-hint"
+                               aria-hidden="true"></i>
+                        </td>
+                        <td class="kb-reg-cell" th:text="${p.regulatoryReference ?: '—'}">—</td>
+                        <td class="text-muted kb-source-cell" th:text="${p.source ?: '—'}">—</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<style>
+/* ========================================================
+   Detection Rule Thresholds section
+   ======================================================== */
+.rule-transparency {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem 1.15rem;
+    background: linear-gradient(135deg, rgba(6,182,212,0.08) 0%, rgba(99,102,241,0.08) 100%);
+    border: 1px solid rgba(99,102,241,0.22);
+    border-radius: 10px;
+    color: var(--fg-text);
+    font-size: 0.88rem;
+    line-height: 1.65;
+}
+.rule-transparency__icon {
+    color: var(--fg-info);
+    font-size: 1.15rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.rule-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+}
+@media (min-width: 1200px) {
+    .rule-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.rule-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(148,163,184,0.18);
+    border-radius: 12px;
+    padding: 1.1rem 1.25rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    transition: border-color 0.15s ease;
+}
+.rule-card:hover { border-color: rgba(99,102,241,0.35); }
+.rule-card__header { display: flex; flex-direction: column; gap: 0.2rem; }
+.rule-card__title {
+    font-size: 1.05rem; font-weight: 600;
+    color: var(--fg-text); margin: 0;
+}
+.rule-card__desc {
+    font-size: 0.82rem; color: var(--fg-muted); line-height: 1.5;
+}
+
+.rule-values {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem;
+}
+.rule-value {
+    background: rgba(15,23,42,0.45);
+    border: 1px solid rgba(148,163,184,0.15);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+    display: flex; flex-direction: column; gap: 0.15rem;
+    min-width: 0;
+}
+.rule-value__label {
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--fg-muted); font-weight: 500;
+}
+.rule-value__num {
+    font-size: 0.95rem; font-weight: 600; color: var(--fg-text);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rule-value__dash { opacity: 0.55; margin: 0 0.15rem; }
+.rule-value--thesis {
+    background: linear-gradient(135deg, rgba(16,185,129,0.14) 0%, rgba(6,182,212,0.10) 100%);
+    border-color: rgba(16,185,129,0.35);
+}
+.rule-value--thesis .rule-value__label { color: #34d399; }
+.rule-value--paper    { opacity: 0.78; }
+.rule-value--industry .rule-value__num { font-size: 0.85rem; }
+
+.rule-current {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    padding-top: 0.35rem;
+}
+.rule-current__label {
+    font-size: 0.78rem; color: var(--fg-muted);
+    font-weight: 500; margin: 0;
+}
+.rule-current__group .form-control {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+.rule-current__prefix, .rule-current__unit {
+    background: rgba(99,102,241,0.12);
+    color: #a5b4fc;
+    border-color: rgba(99,102,241,0.22);
+    font-weight: 500;
+}
+
+.rule-status { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.rule-badge {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.22rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.74rem; font-weight: 500;
+}
+.rule-badge i { font-size: 0.78rem; }
+.rule-badge--ok    { background: rgba(16,185,129,0.15); color: #34d399; }
+.rule-badge--edited{ background: rgba(251,191,36,0.14); color: #fbbf24; }
+.rule-badge--warn  { background: rgba(251,146,60,0.16); color: #fb923c; }
+
+.rule-card__footer {
+    display: flex; flex-wrap: wrap; gap: 0.6rem;
+    justify-content: space-between; align-items: center;
+    padding-top: 0.5rem;
+    border-top: 1px dashed rgba(148,163,184,0.15);
+}
+.rule-citation {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.78rem; color: var(--fg-muted);
+    min-width: 0;
+}
+.rule-citation span {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 340px;
+}
+.rule-why-link {
+    color: var(--fg-primary-h, #a5b4fc);
+    font-size: 0.78rem; text-decoration: none; white-space: nowrap;
+}
+.rule-why-link:hover { text-decoration: underline; }
+
+/* ========================================================
+   Existing KB hero + pattern table styles
+   ======================================================== */
+.kb-hero {
+    background: linear-gradient(135deg, rgba(6,182,212,0.07) 0%, rgba(99,102,241,0.07) 100%);
+    border: 1px solid rgba(99,102,241,0.18);
+    border-radius: 14px;
+    padding: 1.25rem 1.5rem;
+}
+.kb-hero-icon {
+    width: 52px; height: 52px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #06b6d4, #6366f1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; color: #fff;
+    flex-shrink: 0;
+}
+.kb-info-row {
+    display: flex; align-items: flex-start; gap: 0.6rem;
+    font-size: 0.84rem; color: var(--fg-muted);
+    line-height: 1.5;
+}
+.kb-info-row i { flex-shrink: 0; margin-top: 1px; }
+.kb-type-badge {
+    background: rgba(99,102,241,0.15);
+    color: #a5b4fc;
+    border: 1px solid rgba(99,102,241,0.2);
+    font-size: 0.73rem;
+}
+
+/* Pattern-table cells — consistent sizing + click-to-expand UX on description. */
+.kb-title-cell  { font-size: 0.88rem; }
+.kb-desc-cell {
+    font-size: 0.85rem;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.15s, color 0.15s;
+}
+.kb-desc-cell:hover { color: var(--fg-text); background: rgba(99,102,241,0.06); }
+.kb-desc-cell:focus { outline: 2px solid var(--fg-primary); outline-offset: -2px; }
+.kb-expand-hint {
+    font-size: 0.7rem;
+    opacity: 0.4;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+    transition: opacity 0.15s;
+}
+.kb-desc-cell:hover .kb-expand-hint { opacity: 0.9; }
+.kb-reg-cell    { font-size: 0.82rem; color: var(--fg-info); }
+.kb-source-cell { font-size: 0.82rem; }
+
+/* "RAG ready" / "Not seeded" status pill */
+.kb-status {
+    display: inline-flex; align-items: center;
+    font-size: 0.78rem;
+    padding: 0.25em 0.5em;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+}
+.kb-status--ready {
+    background: rgba(34,197,94,0.12);
+    color: var(--fg-success);
+    border-color: rgba(34,197,94,0.25);
+}
+.kb-status--empty {
+    background: rgba(239,68,68,0.12);
+    color: var(--fg-danger);
+    border-color: rgba(239,68,68,0.25);
+}
+</style>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // Unique pattern types are now pre-computed server-side; no client-side
+    // dedup needed. See WebController.knowledge() → uniquePatternTypes.
+
+    // ── Pattern description viewer ───────────────────────────────────────────
+    // Rows with truncated descriptions expose the full text via the native
+    // title attribute (browser tooltip on hover) and via a styled modal on
+    // click — so users never lose access to the end of a long description.
+    (function () {
+        const modal = document.getElementById('patternModal');
+        if (!modal) return;
+        const bsModal = new bootstrap.Modal(modal);
+
+        const titleEl = document.getElementById('patternModalTitle');
+        const typeEl  = document.getElementById('patternModalType');
+        const descEl  = document.getElementById('patternModalDescription');
+        const regEl   = document.getElementById('patternModalReg');
+        const srcEl   = document.getElementById('patternModalSource');
+
+        function openFor(cell) {
+            titleEl.textContent = cell.dataset.fullTitle || 'Fraud pattern';
+            typeEl.textContent  = cell.dataset.type || '';
+            descEl.textContent  = cell.dataset.fullDescription || '(no description)';
+            regEl.textContent   = cell.dataset.reg
+                ? 'Regulatory reference: ' + cell.dataset.reg
+                : '';
+            srcEl.textContent   = cell.dataset.source
+                ? 'Source: ' + cell.dataset.source
+                : '';
+            bsModal.show();
+        }
+
+        document.querySelectorAll('.kb-desc-cell').forEach(cell => {
+            cell.addEventListener('click', () => openFor(cell));
+            cell.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openFor(cell);
+                }
+            });
+        });
+    })();
+
+    document.getElementById('seedBtn').addEventListener('click', async () => {
+        const btn     = document.getElementById('seedBtn');
+        const spinner = document.getElementById('seedSpinner');
+        const result  = document.getElementById('seedResult');
+
+        btn.disabled = true;
+        spinner.style.display = 'flex';
+        result.style.display = 'none';
+
+        try {
+            // FG.fetchJson throws on non-2xx and parses JSON. Business-level
+            // success flag (false on semantic errors while still HTTP 200)
+            // is still conveyed in the body and checked below.
+            const data = await FG.fetchJson('/api/v1/knowledge/seed', { method: 'POST' });
+            spinner.style.display = 'none';
+            result.style.display  = 'block';
+            if (data.success) {
+                result.innerHTML =
+                    '<i class="bi bi-check-circle-fill text-success me-1"></i>' +
+                    `<strong>${data.saved}</strong> patterns saved, ` +
+                    `<strong>${data.skipped}</strong> skipped, ` +
+                    `<strong>${data.vectorized}</strong> vectorized.`;
+                if (data.saved > 0) setTimeout(() => location.reload(), 1200);
+            } else {
+                result.innerHTML = '<i class="bi bi-x-circle-fill text-danger me-1"></i>'
+                    + FG.escapeHtml(data.error || 'Seeding failed');
+            }
+        } catch (err) {
+            spinner.style.display = 'none';
+            result.style.display  = 'block';
+            result.innerHTML = '<i class="bi bi-x-circle-fill text-danger me-1"></i>'
+                + FG.escapeHtml(err.message);
+        }
+        btn.disabled = false;
+    });
+
+    // ================================================================
+    // Detection Rule Thresholds — per-row edit + global reset
+    // ================================================================
+    (function () {
+        const table = document.getElementById('rule-thresholds-table');
+        if (!table) return;
+
+        const feedback = document.getElementById('ruleThresholdsFeedback');
+        const rationaleModalEl = document.getElementById('ruleRationaleModal');
+        const rationaleModal   = rationaleModalEl ? new bootstrap.Modal(rationaleModalEl) : null;
+
+        function showFeedback(kind, msg) {
+            if (!feedback) return;
+            const cls = kind === 'ok' ? 'alert-success' : 'alert-danger';
+            feedback.innerHTML = '<div class="alert ' + cls + ' py-2 mb-0">' + FG.escapeHtml(msg) + '</div>';
+            setTimeout(() => { feedback.innerHTML = ''; }, 4000);
+        }
+
+        // Layout-agnostic row/card selector — matches the rule-grid cards *and*
+        // the older table-row layout (safe if the UI ever swaps back).
+        const ROW_SELECTOR = '[data-rule]';
+
+        async function saveRow(row) {
+            const rule  = row.dataset.rule;
+            const input = row.querySelector('.rule-value-input');
+            const value = input.value.trim();
+            if (!value || Number(value) <= 0) {
+                showFeedback('err', 'Threshold must be a positive number.');
+                return;
+            }
+            const btn = row.querySelector('.rule-save-btn');
+            btn.disabled = true;
+            try {
+                const data = await FG.fetchJson('/api/v1/rules/' + encodeURIComponent(rule), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: Number(value) })
+                });
+                input.dataset.original = data.currentValue;
+                showFeedback('ok', rule + ' updated — takes effect on next rule evaluation.');
+                // Reload so the "At thesis default" badge + server-side formatting refresh.
+                setTimeout(() => location.reload(), 600);
+            } catch (err) {
+                showFeedback('err', FG.escapeHtml(err.message));
+                input.value = input.dataset.original;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Per-row save
+        table.querySelectorAll('.rule-save-btn').forEach(btn => {
+            btn.addEventListener('click', () => saveRow(btn.closest(ROW_SELECTOR)));
+        });
+
+        // Per-row "reset to thesis default" fills the input; user still clicks Save
+        // so accidental resets don't bypass confirmation.
+        table.querySelectorAll('.rule-reset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const input = btn.closest(ROW_SELECTOR).querySelector('.rule-value-input');
+                input.value = btn.dataset.thesisDefault;
+                input.focus();
+            });
+        });
+
+        // Enter-key in any input triggers the row's save button
+        table.querySelectorAll('.rule-value-input').forEach(input => {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveRow(input.closest(ROW_SELECTOR));
+                }
+            });
+        });
+
+        // Rationale modal toggle
+        table.querySelectorAll('.rule-rationale-toggle').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (!rationaleModal) return;
+                document.getElementById('rationaleModalTitle').textContent =
+                    a.dataset.humanName || 'Rule';
+                document.getElementById('rationaleModalBody').textContent =
+                    a.dataset.rationale || '';
+                rationaleModal.show();
+            });
+        });
+
+        // Reset-all button
+        const resetAllBtn = document.getElementById('resetAllRulesBtn');
+        if (resetAllBtn) {
+            resetAllBtn.addEventListener('click', async () => {
+                if (!confirm('Reset every rule to its thesis default? Any customisations will be lost.')) return;
+                resetAllBtn.disabled = true;
+                try {
+                    await FG.fetchJson('/api/v1/rules/reset', { method: 'POST' });
+                    showFeedback('ok', 'All rules reset to thesis defaults.');
+                    setTimeout(() => location.reload(), 800);
+                } catch (err) {
+                    showFeedback('err', FG.escapeHtml(err.message));
+                } finally {
+                    resetAllBtn.disabled = false;
+                }
+            });
+        }
+    })();
+</script>
+</body>
+</html>

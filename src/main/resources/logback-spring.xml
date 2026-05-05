@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ==================== Console Appender (Development) ==================== -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- Include correlation ID and optional txId/config from MDC for request tracing -->
+            <pattern>%d{HH:mm:ss.SSS} [%thread] [%X{correlationId:-no-corr}] [tx:%X{txId:-}] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ==================== File Appender (Structured JSON for production) ==================== -->
+    <springProfile name="production">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>logs/finguard.log</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <fileNamePattern>logs/finguard.%d{yyyy-MM-dd}.log</fileNamePattern>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>1GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{correlationId:-}] %-5level %logger{60} - %msg%n</pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <!-- ==================== Logger Configuration ==================== -->
+
+    <!-- FinGuard application logging -->
+    <logger name="dev.finguard" level="INFO"/>
+
+    <!-- Detection pipeline: INFO shows batch progress, DEBUG shows per-transaction -->
+    <logger name="dev.finguard.detection" level="INFO"/>
+
+    <!-- LLM calls: INFO shows latency/tokens, DEBUG shows prompt content -->
+    <logger name="dev.finguard.explanation.llm" level="INFO"/>
+
+    <!-- RAG retrieval: INFO shows document counts, DEBUG shows queries -->
+    <logger name="dev.finguard.explanation.rag" level="INFO"/>
+
+    <!-- Evaluation: INFO shows experiment results, DEBUG shows per-alert scoring -->
+    <logger name="dev.finguard.evaluation" level="INFO"/>
+
+    <!-- Spring AI: reduce noise from framework internals -->
+    <logger name="org.springframework.ai" level="WARN"/>
+
+    <!-- Hibernate SQL: toggle for debugging -->
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.hibernate.type.descriptor.sql" level="WARN"/>
+
+    <!-- Spring retry logging -->
+    <logger name="org.springframework.retry" level="DEBUG"/>
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

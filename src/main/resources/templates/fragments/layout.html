@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+
+<!-- ============================================================== -->
+<!-- Reusable head fragment: Bootstrap 5 + Chart.js + custom CSS     -->
+<!-- ============================================================== -->
+<head th:fragment="head(title)">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${title}">FinGuard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+          rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+          rel="stylesheet">
+    <link th:href="@{/css/finguard.css}" rel="stylesheet">
+    <link rel="icon" href="data:,">
+</head>
+
+<!-- ============================================================== -->
+<!-- Sidebar navigation                                              -->
+<!-- ============================================================== -->
+<nav th:fragment="sidebar" class="sidebar d-flex flex-column p-3">
+    <a class="sidebar-brand d-flex align-items-center mb-4 text-decoration-none" th:href="@{/}">
+        <i class="bi bi-shield-check fs-3 me-2"></i>
+        <span class="fs-5 fw-bold">FinGuard</span>
+    </a>
+
+    <!-- Sidebar ordered by thesis workflow:
+         1. Home          → Dashboard
+         2. Setup         → Data Ingestion → ML Models → Knowledge Base (run once per dataset)
+         3. Run           → Evaluation → Run Detection (Evaluation first — it's the primary action;
+                            Run Detection is explicitly optional per the note on that page)
+         4. Inspect       → Transactions / Alerts / Explanations (after the pipeline has run) -->
+    <ul class="nav nav-pills flex-column mb-auto">
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'dashboard'} ? 'active'" th:href="@{/dashboard}">
+                <i class="bi bi-speedometer2 me-2"></i> Dashboard
+            </a>
+        </li>
+
+        <li class="nav-item mt-3">
+            <small class="text-muted px-3">Setup</small>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'ingestion'} ? 'active'" th:href="@{/ingestion}">
+                <i class="bi bi-upload me-2"></i> Data Ingestion
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'models'} ? 'active'" th:href="@{/models}">
+                <i class="bi bi-cpu me-2"></i> ML Models
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'knowledge'} ? 'active'" th:href="@{/knowledge}">
+                <i class="bi bi-book me-2"></i> Knowledge Base
+            </a>
+        </li>
+
+        <li class="nav-item mt-3">
+            <small class="text-muted px-3">Run</small>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'evaluation'} ? 'active'" th:href="@{/evaluation}">
+                <i class="bi bi-graph-up me-2"></i> Evaluation
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'detection'} ? 'active'" th:href="@{/detection}">
+                <i class="bi bi-search me-2"></i> Run Detection
+                <span class="badge bg-secondary ms-1" style="font-size:0.6rem" title="Detection runs automatically as part of Evaluation — this page is optional">optional</span>
+            </a>
+        </li>
+
+        <li class="nav-item mt-3">
+            <small class="text-muted px-3">Inspect</small>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'transactions'} ? 'active'" th:href="@{/transactions}">
+                <i class="bi bi-arrow-left-right me-2"></i> Transactions
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'alerts'} ? 'active'" th:href="@{/alerts}">
+                <i class="bi bi-exclamation-triangle me-2"></i> Alerts
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:classappend="${activePage == 'explanations'} ? 'active'" th:href="@{/explanations}">
+                <i class="bi bi-chat-left-text me-2"></i> Explanations
+            </a>
+        </li>
+    </ul>
+
+    <div class="mt-auto pt-3 border-top border-secondary">
+        <ul class="nav nav-pills flex-column mb-2">
+            <li class="nav-item">
+                <a class="nav-link" th:classappend="${activePage == 'system'} ? 'active'" th:href="@{/system}">
+                    <i class="bi bi-hdd-network me-2"></i> System
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" th:classappend="${activePage == 'settings'} ? 'active'" th:href="@{/settings}">
+                    <i class="bi bi-gear me-2"></i> LLM Settings
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" th:classappend="${activePage == 'guide'} ? 'active'" th:href="@{/guide}">
+                    <i class="bi bi-journal-bookmark me-2"></i> User Guide
+                </a>
+            </li>
+        </ul>
+        <small class="text-muted">
+            <i class="bi bi-info-circle me-1"></i> FinGuard v1.0
+        </small>
+    </div>
+</nav>
+
+<!-- ============================================================== -->
+<!-- Live activity log panel (fixed bottom-right)                    -->
+<!-- ============================================================== -->
+<div th:fragment="logPanel">
+    <!-- Toggle button -->
+    <button id="logToggleBtn" class="log-toggle-btn" title="Toggle activity log (L)"
+            aria-label="Toggle activity log" aria-expanded="false" aria-controls="logPanel">
+        <i class="bi bi-terminal-fill"></i>
+        <span id="logBadge" class="log-badge" style="display:none">0</span>
+    </button>
+
+    <!-- Log drawer -->
+    <div id="logPanel" class="log-panel" role="region" aria-label="Live activity log">
+        <!-- Header: title, status dot, action buttons -->
+        <div class="log-panel-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-terminal"></i>
+                <span class="fw-semibold">Activity Log</span>
+                <span id="logStatus" class="log-status log-status--connecting"
+                      title="Polling state">
+                    <span class="log-status-dot"></span>
+                    <span class="log-status-text">connecting…</span>
+                </span>
+            </div>
+            <div class="d-flex gap-1 align-items-center">
+                <span class="log-counter" id="logVisibleCounter" title="Visible / total entries"></span>
+                <button class="log-icon-btn" id="logPauseBtn"
+                        title="Pause auto-scroll (auto-pauses when you scroll up)">
+                    <i class="bi bi-pause-fill"></i>
+                </button>
+                <button class="log-icon-btn" id="logCopyBtn"
+                        title="Copy visible entries to clipboard">
+                    <i class="bi bi-clipboard"></i>
+                </button>
+                <button class="log-icon-btn" id="logClearBtn" title="Clear log">
+                    <i class="bi bi-trash3"></i>
+                </button>
+                <button class="log-icon-btn" id="logCloseBtn" title="Close (L)">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Controls: level filters + search -->
+        <div class="log-panel-controls">
+            <div class="log-filter-chips" role="group" aria-label="Level filter">
+                <button class="log-chip log-chip--info    active" data-level="INFO"  title="Toggle INFO lines">INFO</button>
+                <button class="log-chip log-chip--warn    active" data-level="WARN"  title="Toggle WARN lines">WARN</button>
+                <button class="log-chip log-chip--error   active" data-level="ERROR" title="Toggle ERROR lines">ERROR</button>
+            </div>
+            <div class="log-search-wrap">
+                <i class="bi bi-search log-search-icon"></i>
+                <input type="search" class="log-search-input" id="logSearchInput"
+                       placeholder="Filter…" autocomplete="off" aria-label="Filter log lines">
+                <button class="log-search-clear" id="logSearchClear" title="Clear filter" style="display:none">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Body: virtualized-friendly container for log lines -->
+        <div id="logBody" class="log-panel-body" aria-live="polite" aria-atomic="false" tabindex="0"></div>
+
+        <!-- Footer: keyboard hint -->
+        <div class="log-panel-footer">
+            <span><kbd>L</kbd> toggle · <kbd>/</kbd> filter · <kbd>Esc</kbd> close</span>
+            <a href="/api/v1/system/logs?limit=200" target="_blank" class="log-footer-link"
+               title="Open raw JSON response">raw</a>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        const toggleBtn   = document.getElementById('logToggleBtn');
+        const panel       = document.getElementById('logPanel');
+        const logBody     = document.getElementById('logBody');
+        const logBadge    = document.getElementById('logBadge');
+        const logStatus   = document.getElementById('logStatus');
+        const statusText  = logStatus.querySelector('.log-status-text');
+        const clearBtn    = document.getElementById('logClearBtn');
+        const copyBtn     = document.getElementById('logCopyBtn');
+        const pauseBtn    = document.getElementById('logPauseBtn');
+        const closeBtn    = document.getElementById('logCloseBtn');
+        const searchInput = document.getElementById('logSearchInput');
+        const searchClear = document.getElementById('logSearchClear');
+        const counterEl   = document.getElementById('logVisibleCounter');
+
+        let isOpen       = false;
+        let lastEpochMs  = 0;
+        let unreadCount  = 0;
+        let intervalId   = null;
+        let autoScroll   = true;      // false when user has scrolled up or clicked pause
+        const MAX_LINES  = 500;       // cap DOM size — old lines get shifted out
+
+        // Active filters: every level starts enabled; search is empty.
+        const levelFilter = { INFO: true, WARN: true, ERROR: true };
+        let searchTerm = '';
+
+        const OPEN_INTERVAL   = 2000;
+        const CLOSED_INTERVAL = 5000;
+
+        // Entries live in memory so filters can be applied without re-fetching.
+        const entries = [];
+
+        // Palette per logger class so services are visually distinguishable at a glance.
+        // Hash the logger name to pick a colour — stable across reloads.
+        const LOGGER_COLORS = [
+            '#818cf8', // indigo
+            '#4ade80', // green
+            '#fbbf24', // amber
+            '#f87171', // red
+            '#22d3ee', // cyan
+            '#c084fc', // purple
+            '#f472b6', // pink
+            '#2dd4bf'  // teal
+        ];
+        function loggerColor(name) {
+            let h = 0;
+            for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+            return LOGGER_COLORS[Math.abs(h) % LOGGER_COLORS.length];
+        }
+
+        // ── Open/close + keyboard shortcuts ───────────────────────────
+        function setOpen(open) {
+            isOpen = open;
+            panel.classList.toggle('log-panel--open', open);
+            toggleBtn.setAttribute('aria-expanded', String(open));
+            if (open) {
+                unreadCount = 0;
+                logBadge.style.display = 'none';
+                // Render whatever is in memory NOW. While the panel was closed,
+                // ingest() kept appending entries to `entries[]` but skipped the
+                // DOM rebuild to save work. Without this call, opening the panel
+                // shows stale / empty content until the next poll cycle fires.
+                rerender();
+                if (autoScroll) logBody.scrollTop = logBody.scrollHeight;
+            }
+            restartPolling();
+        }
+
+        toggleBtn.addEventListener('click', () => setOpen(!isOpen));
+        closeBtn.addEventListener('click', () => setOpen(false));
+
+        document.addEventListener('keydown', (e) => {
+            const tag = (e.target && e.target.tagName) || '';
+            const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable);
+            if (e.key === 'l' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+                e.preventDefault();
+                setOpen(!isOpen);
+            } else if (e.key === 'Escape' && isOpen) {
+                setOpen(false);
+            } else if (e.key === '/' && isOpen && !typing) {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+        });
+
+        // ── Filters & search ──────────────────────────────────────────
+        document.querySelectorAll('.log-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const lvl = chip.dataset.level;
+                levelFilter[lvl] = !levelFilter[lvl];
+                chip.classList.toggle('active', levelFilter[lvl]);
+                rerender();
+            });
+        });
+
+        // Debounce the search-input rerender — typing quickly on a 500-entry buffer
+        // previously fired a full DOM rebuild per keystroke, which felt laggy.
+        // 180 ms is short enough to feel instant, long enough to coalesce a burst.
+        let searchDebounce = null;
+        searchInput.addEventListener('input', () => {
+            searchTerm = searchInput.value.trim().toLowerCase();
+            searchClear.style.display = searchTerm ? 'flex' : 'none';
+            if (searchDebounce) clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+                searchDebounce = null;
+                rerender();
+            }, 180);
+        });
+        searchClear.addEventListener('click', () => {
+            searchInput.value = '';
+            searchTerm = '';
+            searchClear.style.display = 'none';
+            rerender();
+            searchInput.focus();
+        });
+
+        // ── Auto-scroll pause ─────────────────────────────────────────
+        logBody.addEventListener('scroll', () => {
+            const nearBottom = (logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight) < 20;
+            if (!nearBottom && autoScroll) setAutoScroll(false);
+            else if (nearBottom && !autoScroll) setAutoScroll(true);
+        });
+        pauseBtn.addEventListener('click', () => setAutoScroll(!autoScroll));
+        function setAutoScroll(on) {
+            autoScroll = on;
+            pauseBtn.innerHTML = on
+                ? '<i class="bi bi-pause-fill"></i>'
+                : '<i class="bi bi-play-fill"></i>';
+            pauseBtn.title = on ? 'Pause auto-scroll' : 'Resume auto-scroll';
+            pauseBtn.classList.toggle('log-icon-btn--active', !on);
+        }
+
+        // ── Clear / copy ──────────────────────────────────────────────
+        clearBtn.addEventListener('click', () => {
+            entries.length = 0;
+            rerender();
+        });
+        copyBtn.addEventListener('click', async () => {
+            const text = visible()
+                .map(e => `${e.time}  ${e.level.padEnd(5)}  ${e.logger}  ${e.message}`)
+                .join('\n');
+            try {
+                await navigator.clipboard.writeText(text);
+                copyBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                setTimeout(() => { copyBtn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 900);
+            } catch {
+                copyBtn.title = 'Copy failed (clipboard blocked)';
+            }
+        });
+
+        // ── Rendering ────────────────────────────────────────────────
+        function visible() {
+            if (!searchTerm && Object.values(levelFilter).every(Boolean)) return entries;
+            return entries.filter(e =>
+                levelFilter[e.level] !== false &&
+                (!searchTerm ||
+                 e.message.toLowerCase().includes(searchTerm) ||
+                 e.logger.toLowerCase().includes(searchTerm)));
+        }
+
+        // Deduplication: collapse N consecutive identical (level+logger+msg) lines
+        // into a single row with a ×N badge. Reduces visual clutter during progress
+        // bursts that emit the same line every tick.
+        function collapse(list) {
+            const out = [];
+            for (const e of list) {
+                const last = out[out.length - 1];
+                if (last && last.level === e.level && last.logger === e.logger && last.message === e.message) {
+                    last.repeatCount = (last.repeatCount || 1) + 1;
+                    last.time = e.time;  // show most recent
+                    last.epochMs = e.epochMs;
+                } else {
+                    out.push(Object.assign({}, e, { repeatCount: 1 }));
+                }
+            }
+            return out;
+        }
+
+        /** Build a single DOM row for a collapsed entry. Shared by full + incremental render. */
+        function buildRow(e) {
+            const line = document.createElement('div');
+            line.className = 'log-line log-line--' + e.level.toLowerCase();
+            line.innerHTML =
+                `<span class="log-time">${escHtml(e.time)}</span>` +
+                `<span class="log-level log-level--${e.level.toLowerCase()}">${escHtml(e.level)}</span>` +
+                `<span class="log-logger" style="color:${loggerColor(e.logger)}">${escHtml(e.logger)}</span>` +
+                `<span class="log-msg">${highlight(escHtml(e.message), searchTerm)}</span>` +
+                (e.repeatCount > 1 ? `<span class="log-repeat" title="Repeated ${e.repeatCount} times">×${e.repeatCount}</span>` : '');
+            return line;
+        }
+
+        function rerender() {
+            const v = visible();
+            const rows = collapse(v);
+
+            const frag = document.createDocumentFragment();
+            rows.forEach(e => frag.appendChild(buildRow(e)));
+
+            logBody.innerHTML = '';
+            logBody.appendChild(frag);
+            if (isOpen && autoScroll) logBody.scrollTop = logBody.scrollHeight;
+
+            counterEl.textContent = v.length === entries.length
+                ? `${entries.length}`
+                : `${v.length}/${entries.length}`;
+        }
+
+        /**
+         * Fast path: append only new entries to the DOM, trimming old rows if the
+         * total exceeds MAX_LINES. Avoids the full {@code innerHTML = ''} + 500-row
+         * rebuild on every poll during high-volume runs. Falls back to full
+         * {@link rerender} when search / collapse would force a layout change.
+         */
+        function appendIncremental(newEntries) {
+            // Filter + collapse the NEW entries against the last rendered one. This
+            // preserves the repeat-×N badge across poll boundaries when a noisy
+            // logger keeps emitting the same line.
+            const filtered = newEntries.filter(e =>
+                levelFilter[e.level] !== false &&
+                (!searchTerm ||
+                 e.message.toLowerCase().includes(searchTerm) ||
+                 e.logger.toLowerCase().includes(searchTerm)));
+            if (filtered.length === 0) {
+                // Only update the counter — visible() is unchanged.
+                const v = visible();
+                counterEl.textContent = v.length === entries.length
+                    ? `${entries.length}`
+                    : `${v.length}/${entries.length}`;
+                return;
+            }
+
+            const frag = document.createDocumentFragment();
+            let lastRendered = logBody.lastElementChild;
+            for (const e of filtered) {
+                // Merge with the previous DOM row if this entry is an exact
+                // duplicate (consistent with collapse() behaviour).
+                if (lastRendered) {
+                    const prevLevel = lastRendered.dataset.level;
+                    const prevLogger = lastRendered.dataset.logger;
+                    const prevMsg = lastRendered.dataset.msg;
+                    if (prevLevel === e.level && prevLogger === e.logger && prevMsg === e.message) {
+                        const count = (parseInt(lastRendered.dataset.repeat || '1', 10) || 1) + 1;
+                        lastRendered.dataset.repeat = String(count);
+                        let repeatSpan = lastRendered.querySelector('.log-repeat');
+                        if (!repeatSpan) {
+                            repeatSpan = document.createElement('span');
+                            repeatSpan.className = 'log-repeat';
+                            lastRendered.appendChild(repeatSpan);
+                        }
+                        repeatSpan.textContent = '×' + count;
+                        repeatSpan.title = 'Repeated ' + count + ' times';
+                        // Also update the time on the existing row.
+                        const timeSpan = lastRendered.querySelector('.log-time');
+                        if (timeSpan) timeSpan.textContent = e.time;
+                        continue;
+                    }
+                }
+                const row = buildRow(e);
+                row.dataset.level = e.level;
+                row.dataset.logger = e.logger;
+                row.dataset.msg = e.message;
+                row.dataset.repeat = '1';
+                frag.appendChild(row);
+                lastRendered = row;
+            }
+            logBody.appendChild(frag);
+
+            // Trim oldest rows if DOM exceeds MAX_LINES. Matches the in-memory cap.
+            while (logBody.childElementCount > MAX_LINES) {
+                logBody.removeChild(logBody.firstElementChild);
+            }
+
+            if (isOpen && autoScroll) logBody.scrollTop = logBody.scrollHeight;
+
+            const v = visible();
+            counterEl.textContent = v.length === entries.length
+                ? `${entries.length}`
+                : `${v.length}/${entries.length}`;
+        }
+
+        function highlight(text, term) {
+            if (!term) return text;
+            // Simple case-insensitive highlight; term is already compared lowercase.
+            const re = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+            return text.replace(re, '<mark class="log-mark">$1</mark>');
+        }
+
+        function escHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // ── Polling ──────────────────────────────────────────────────
+        function ingest(newEntries) {
+            if (!newEntries.length) return;
+            const prevCount = entries.length;
+            entries.push(...newEntries);
+            // Cap total in-memory entries — shift oldest off.
+            if (entries.length > MAX_LINES) entries.splice(0, entries.length - MAX_LINES);
+
+            if (isOpen) {
+                // Fast path — append only the new entries to the DOM. A full
+                // rerender() would rebuild up to MAX_LINES nodes every poll, which
+                // dominates the panel's CPU budget during high-volume runs.
+                appendIncremental(newEntries);
+            } else {
+                // Panel closed — badge counts only entries that would actually be
+                // visible if the panel were opened right now. Must apply BOTH the
+                // level filter AND the active search term, otherwise the badge
+                // overcounts and the user clicks to a panel that looks empty.
+                const newlyVisible = newEntries.filter(e =>
+                    levelFilter[e.level] !== false &&
+                    (!searchTerm ||
+                     e.message.toLowerCase().includes(searchTerm) ||
+                     e.logger.toLowerCase().includes(searchTerm)));
+                unreadCount += newlyVisible.length;
+                if (unreadCount > 0) {
+                    logBadge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+                    logBadge.style.display = 'inline-block';
+                }
+            }
+        }
+
+        function setStatus(cls, text) {
+            logStatus.classList.remove('log-status--connecting', 'log-status--live',
+                                       'log-status--offline', 'log-status--error');
+            logStatus.classList.add('log-status--' + cls);
+            statusText.textContent = text;
+        }
+
+        async function poll() {
+            try {
+                const url = lastEpochMs
+                    ? `/api/v1/system/logs?since=${lastEpochMs}`
+                    : `/api/v1/system/logs?limit=50`;
+                const res = await fetch(url);
+                if (!res.ok) { setStatus('error', 'error'); return; }
+                const fresh = await res.json();
+                if (fresh.length) {
+                    lastEpochMs = fresh[fresh.length - 1].epochMs;
+                    ingest(fresh);
+                }
+                setStatus('live', 'live');
+            } catch (_) {
+                setStatus('offline', 'offline');
+            }
+        }
+
+        function restartPolling() {
+            if (intervalId) clearInterval(intervalId);
+            poll();
+            intervalId = setInterval(poll, isOpen ? OPEN_INTERVAL : CLOSED_INTERVAL);
+        }
+
+        restartPolling();
+    })();
+    </script>
+</div>
+
+<!-- ============================================================== -->
+<!-- Footer scripts                                                  -->
+<!-- ============================================================== -->
+<div th:fragment="scripts">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <!-- Shared FinGuard helpers: Chart.js dark theme, COLORS palette,
+         FG.initTooltips(), FG.num(), FG.escapeHtml(), FG.fetchJson(). -->
+    <script th:src="@{/js/finguard.js}"></script>
+</div>
+
+</html>

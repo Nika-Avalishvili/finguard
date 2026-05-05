@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Run Detection')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="bi bi-search me-2"></i>Run Detection</h1>
+        <p>Execute the anomaly detection pipeline on ingested transactions</p>
+    </div>
+
+    <!-- Thesis-focused notice: Detection is optional; Evaluation wraps it -->
+    <div class="alert alert-info d-flex align-items-start gap-3 mb-3" role="alert"
+         style="border-left:4px solid #0dcaf0">
+        <i class="bi bi-info-circle-fill" style="font-size:1.25rem;color:#0dcaf0"></i>
+        <div class="flex-grow-1">
+            <strong>This page is optional for thesis workflows.</strong>
+            <div class="small mt-1">
+                <a href="/evaluation" class="text-info fw-semibold">Run Evaluation</a>
+                already runs detection under the hood <em>and</em> grades the results with
+                precision / recall / F1 / CAKR. Use this page only when you want alerts
+                generated for manual review without the measurement overhead (operational
+                fraud-analyst workflow).
+            </div>
+        </div>
+        <a href="/evaluation" class="btn btn-sm btn-outline-info flex-shrink-0">
+            Go to Evaluation <i class="bi bi-arrow-right ms-1"></i>
+        </a>
+    </div>
+
+    <div class="row g-3">
+
+        <!-- ── Left: config selector + run ─────────────────────────────── -->
+        <div class="col-lg-8">
+
+            <!-- Config cards -->
+            <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-sliders me-1"></i>Detection Configuration
+                    <span class="ms-auto text-muted" style="font-size:0.75rem">Click a card to select</span>
+                </div>
+                <div class="card-body pb-2">
+                    <div class="row g-2" id="configCards">
+
+                        <!-- RULES_ONLY -->
+                        <div class="col-md-6">
+                            <div class="config-card selected" data-config="RULES_ONLY"
+                                 data-bs-toggle="tooltip" data-bs-placement="top"
+                                 title="Threshold-based rule engine: large transactions, rapid velocity, structuring patterns, new-receiver high-value. No ML model required — fastest option.">
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <span class="config-icon config-icon--rules"><i class="bi bi-lightning-fill"></i></span>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <div class="fw-semibold cfg-name">Rules Only</div>
+                                    </div>
+                                    <span class="badge badge-soft badge-soft--rules">Fastest</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="stage-pill stage-rules"><i class="bi bi-check2-circle me-1"></i>Rules</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ML_ONLY -->
+                        <div class="col-md-6">
+                            <div class="config-card" data-config="ML_ONLY"
+                                 data-bs-toggle="tooltip" data-bs-placement="top"
+                                 title="Random Forest + XGBoost ensemble. Uses computed transaction features. Requires trained models — go to ML Models page to train first.">
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <span class="config-icon config-icon--ml"><i class="bi bi-cpu-fill"></i></span>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <div class="fw-semibold cfg-name">ML Only</div>
+                                    </div>
+                                    <span class="badge badge-soft badge-soft--ml">Needs Models</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="stage-pill stage-ml"><i class="bi bi-cpu me-1"></i>ML</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ML_LLM_DIRECT -->
+                        <div class="col-md-6">
+                            <div class="config-card" data-config="ML_LLM_DIRECT"
+                                 data-bs-toggle="tooltip" data-bs-placement="top"
+                                 title="ML detection + LLM-generated natural-language explanation per alert. LLM receives transaction data directly, without external knowledge context.">
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <span class="config-icon config-icon--llm"><i class="bi bi-chat-dots-fill"></i></span>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <div class="fw-semibold cfg-name">ML + LLM</div>
+                                    </div>
+                                    <span class="badge badge-soft badge-soft--llm">Models + LLM</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="stage-pill stage-ml"><i class="bi bi-cpu me-1"></i>ML</span>
+                                    <span class="stage-pill stage-llm"><i class="bi bi-chat-dots me-1"></i>LLM</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ML_LLM_RAG -->
+                        <div class="col-md-6">
+                            <div class="config-card" data-config="ML_LLM_RAG"
+                                 data-bs-toggle="tooltip" data-bs-placement="top"
+                                 title="ML detection + LLM explanation augmented with fraud patterns retrieved from the pgvector knowledge base. Produces more accurate, grounded explanations.">
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <span class="config-icon config-icon--rag"><i class="bi bi-database-fill"></i></span>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <div class="fw-semibold cfg-name">ML + LLM + RAG</div>
+                                    </div>
+                                    <span class="badge badge-soft badge-soft--rag">+ RAG</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="stage-pill stage-ml"><i class="bi bi-cpu me-1"></i>ML</span>
+                                    <span class="stage-pill stage-llm"><i class="bi bi-chat-dots me-1"></i>LLM</span>
+                                    <span class="stage-pill stage-rag"><i class="bi bi-database me-1"></i>RAG</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- FULL_SYSTEM -->
+                        <div class="col-12">
+                            <div class="config-card config-card-full" data-config="FULL_SYSTEM"
+                                 data-bs-toggle="tooltip" data-bs-placement="top"
+                                 title="Complete pipeline: rule-based detection AND ML classification, with RAG-augmented LLM explanation per alert. Best coverage, highest latency. Requires trained models, LLM, and populated knowledge base.">
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <span class="config-icon config-icon--full"><i class="bi bi-shield-fill-exclamation"></i></span>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <div class="fw-semibold cfg-name">Full System</div>
+                                    </div>
+                                    <span class="badge badge-soft badge-soft--full">Everything</span>
+                                    <span class="badge badge-soft badge-soft--ml ms-1">Thesis Baseline</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="stage-pill stage-rules"><i class="bi bi-check2-circle me-1"></i>Rules</span>
+                                    <span class="stage-pill stage-ml"><i class="bi bi-cpu me-1"></i>ML</span>
+                                    <span class="stage-pill stage-llm"><i class="bi bi-chat-dots me-1"></i>LLM</span>
+                                    <span class="stage-pill stage-rag"><i class="bi bi-database me-1"></i>RAG</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div><!-- /row configCards -->
+
+                    <!-- Hidden select for form submission -->
+                    <select id="detectionConfig" class="d-none">
+                        <option th:each="c : ${configs}" th:value="${c}" th:text="${c.name()}">CONFIG</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Run options + button -->
+            <div class="card mb-3">
+                <div class="card-body py-3">
+                    <label for="limitInput" class="form-label d-flex align-items-center gap-1 mb-2" style="font-size:0.85rem">
+                        Limit <span class="text-muted">(optional)</span>
+                        <i class="bi bi-question-circle text-muted ms-1"
+                           data-bs-toggle="tooltip"
+                           title="Cap the number of transactions analyzed — useful for quick demos. Leave blank to process all transactions."></i>
+                    </label>
+                    <!-- Single-row flex layout: input-group and button share the same height
+                         (form-control default) and sit flush against each other, avoiding the
+                         old invisible-label alignment hack. -->
+                    <div class="d-flex flex-wrap align-items-stretch gap-2">
+                        <div class="input-group flex-grow-1" style="max-width:420px">
+                            <span class="input-group-text fg-input-addon"><i class="bi bi-hash"></i></span>
+                            <input type="number" class="form-control fg-input" id="limitInput"
+                                   placeholder="e.g. 10000  —  blank = all transactions"
+                                   min="1">
+                        </div>
+                        <button class="btn btn-primary px-4" id="runDetectionBtn">
+                            <i class="bi bi-play-fill me-1"></i>Run Detection
+                        </button>
+                    </div>
+                    <div class="form-text mt-2" style="font-size:0.75rem">
+                        All <strong th:text="${#numbers.formatInteger(totalTransactions, 1, 'COMMA')}">0</strong> transactions will be analyzed unless a limit is set.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress / result -->
+            <div id="detectionResult"></div>
+
+        </div><!-- /col-lg-8 -->
+
+        <!-- ── Right: system readiness + guide ──────────────────────────── -->
+        <div class="col-lg-4">
+
+            <!-- System Readiness -->
+            <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-activity me-1"></i>System Readiness
+                </div>
+                <div class="card-body p-0">
+
+                    <!-- Transactions -->
+                    <div class="readiness-row" th:classappend="${totalTransactions == 0} ? 'readiness-warn' : 'readiness-ok'">
+                        <div class="readiness-left">
+                            <span class="readiness-step">1</span>
+                            <div>
+                                <div class="readiness-label">Transactions</div>
+                                <div class="readiness-sub" th:if="${totalTransactions == 0}">
+                                    <a href="/ingestion" class="readiness-action">Import data →</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="readiness-right">
+                            <span class="fw-bold" th:text="${#numbers.formatInteger(totalTransactions, 1, 'COMMA')}">0</span>
+                            <span th:if="${totalTransactions == 0}"
+                                  class="readiness-badge readiness-badge-warn">None</span>
+                            <span th:if="${totalTransactions > 0}"
+                                  class="readiness-badge readiness-badge-ok">Ready</span>
+                        </div>
+                    </div>
+
+                    <!-- Features -->
+                    <div class="readiness-row"
+                         th:classappend="${featuresComputed == 0} ? 'readiness-warn' : (${featuresComputed lt totalTransactions and totalTransactions > 0} ? 'readiness-partial' : 'readiness-ok')">
+                        <div class="readiness-left">
+                            <span class="readiness-step">2</span>
+                            <div>
+                                <div class="readiness-label">
+                                    Features
+                                    <i class="bi bi-question-circle readiness-tip"
+                                       data-bs-toggle="tooltip"
+                                       title="ML configurations require computed features. Run 'Compute Features' on the Data Ingestion page first."></i>
+                                </div>
+                                <div class="readiness-sub"
+                                     th:if="${featuresComputed == 0 or (featuresComputed lt totalTransactions and totalTransactions > 0)}">
+                                    <a href="/ingestion" class="readiness-action">Compute features →</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="readiness-right">
+                            <span class="fw-bold" th:text="${#numbers.formatInteger(featuresComputed, 1, 'COMMA')}">0</span>
+                            <span th:if="${featuresComputed == 0}"
+                                  class="readiness-badge readiness-badge-warn">None</span>
+                            <span th:if="${featuresComputed > 0 and featuresComputed lt totalTransactions and totalTransactions > 0}"
+                                  class="readiness-badge readiness-badge-partial">Partial</span>
+                            <span th:if="${featuresComputed >= totalTransactions and totalTransactions > 0}"
+                                  class="readiness-badge readiness-badge-ok">Ready</span>
+                        </div>
+                    </div>
+
+                    <!-- ML Models -->
+                    <div class="readiness-row" th:classappend="${modelsAvailable} ? 'readiness-ok' : 'readiness-warn'">
+                        <div class="readiness-left">
+                            <span class="readiness-step">3</span>
+                            <div>
+                                <div class="readiness-label">
+                                    ML Models
+                                    <i class="bi bi-question-circle readiness-tip"
+                                       data-bs-toggle="tooltip"
+                                       title="ML_ONLY, ML_LLM_DIRECT, ML_LLM_RAG, and FULL_SYSTEM require trained Random Forest + XGBoost models."></i>
+                                </div>
+                                <div class="readiness-sub" th:unless="${modelsAvailable}">
+                                    <a href="/models" class="readiness-action">Train models →</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="readiness-right">
+                            <span th:if="${modelsAvailable}"
+                                  class="readiness-badge readiness-badge-ok">Loaded</span>
+                            <span th:unless="${modelsAvailable}"
+                                  class="readiness-badge readiness-badge-danger">Not Trained</span>
+                        </div>
+                    </div>
+
+                    <!-- Existing Alerts -->
+                    <div class="readiness-row readiness-neutral" style="border-bottom:none">
+                        <div class="readiness-left">
+                            <span class="readiness-step readiness-step-neutral">4</span>
+                            <div class="readiness-label">Existing Alerts</div>
+                        </div>
+                        <div class="readiness-right">
+                            <span class="fw-bold" th:text="${#numbers.formatInteger(totalAlerts, 1, 'COMMA')}">0</span>
+                            <a th:if="${totalAlerts > 0}" href="/alerts"
+                               class="readiness-badge readiness-badge-link">View →</a>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- How to Use guide -->
+            <div class="card">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-map me-1"></i>How to Use
+                </div>
+                <div class="card-body p-3" style="font-size:0.8rem">
+
+                    <div class="guide-step">
+                        <div class="guide-step-num">1</div>
+                        <div>
+                            <strong>Import transactions</strong>
+                            <div class="text-muted">Upload a PaySim CSV on the <a href="/ingestion" class="text-decoration-none" style="color:var(--fg-primary-h)">Data Ingestion</a> page.</div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step">
+                        <div class="guide-step-num">2</div>
+                        <div>
+                            <strong>Compute features</strong>
+                            <div class="text-muted">Required for ML configs. Run "Compute Features" on the <a href="/ingestion" class="text-decoration-none" style="color:var(--fg-primary-h)">Ingestion</a> page.</div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step">
+                        <div class="guide-step-num">3</div>
+                        <div>
+                            <strong>Train ML models</strong> <span class="text-muted">(if using ML)</span>
+                            <div class="text-muted">Random Forest + XGBoost on the <a href="/models" class="text-decoration-none" style="color:var(--fg-primary-h)">ML Models</a> page.</div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step" style="margin-bottom:0">
+                        <div class="guide-step-num guide-step-num-active">4</div>
+                        <div>
+                            <strong style="color:var(--fg-primary-h)">Run Detection ← You are here</strong>
+                            <div class="text-muted">Select a config and click Run.</div>
+                        </div>
+                    </div>
+
+                    <hr style="border-color:var(--fg-border);margin:10px 0">
+
+                    <div class="d-flex flex-column gap-1">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="stage-pill stage-rules">Rules</span>
+                            <span class="text-muted">Threshold checks — <em>no ML needed</em></span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="stage-pill stage-ml">ML</span>
+                            <span class="text-muted">Ensemble score — needs features</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="stage-pill stage-llm">LLM</span>
+                            <span class="text-muted">Natural-language explanation</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="stage-pill stage-rag">RAG</span>
+                            <span class="text-muted">Fraud pattern context</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div><!-- /row -->
+</main>
+
+<style>
+/* ── Config cards ──────────────────────────────────────────────── */
+.config-card {
+    background: var(--fg-card);
+    border: 2px solid var(--fg-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    height: 100%;
+}
+.config-card:hover {
+    border-color: var(--fg-primary);
+    background: rgba(99,102,241,0.04);
+}
+.config-card.selected {
+    border-color: var(--fg-primary);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+    background: rgba(99,102,241,0.06);
+}
+.config-card-full { border-style: dashed; }
+.config-card-full.selected { border-style: solid; }
+.config-icon {
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+.cfg-name { font-size: 0.85rem; }
+.stage-pill {
+    display: inline-flex; align-items: center;
+    font-size: 0.68rem; font-weight: 600;
+    padding: 2px 7px; border-radius: 99px;
+}
+.stage-rules  { background: rgba(34,197,94,0.15);  color: var(--fg-success); }
+.stage-ml     { background: rgba(99,102,241,0.15); color: var(--fg-primary-h); }
+.stage-llm    { background: rgba(245,158,11,0.15); color: var(--fg-warning); }
+.stage-rag    { background: rgba(6,182,212,0.15);  color: var(--fg-info); }
+
+/* ── Per-config icon (shared palette with stage-* above) ── */
+.config-icon--rules   { background: rgba(34,197,94,0.15);  color: var(--fg-success); }
+.config-icon--ml      { background: rgba(99,102,241,0.15); color: var(--fg-primary-h); }
+.config-icon--llm     { background: rgba(245,158,11,0.15); color: var(--fg-warning); }
+.config-icon--rag     { background: rgba(6,182,212,0.15);  color: var(--fg-info); }
+.config-icon--full    { background: rgba(239,68,68,0.15);  color: var(--fg-danger); }
+
+/* Detection-specific aliases mapping to the global .badge-soft variants  */
+/* — kept so existing class names in this template continue to work.      */
+.badge-soft--rules { background: rgba(34,197,94,0.15);  color: var(--fg-success);   border: 1px solid rgba(34,197,94,0.3); }
+.badge-soft--ml    { background: rgba(99,102,241,0.15); color: var(--fg-primary-h); border: 1px solid rgba(99,102,241,0.3); }
+.badge-soft--llm   { background: rgba(245,158,11,0.15); color: var(--fg-warning);   border: 1px solid rgba(245,158,11,0.3); }
+.badge-soft--rag   { background: rgba(6,182,212,0.15);  color: var(--fg-info);      border: 1px solid rgba(6,182,212,0.3); }
+.badge-soft--full  { background: rgba(239,68,68,0.15);  color: var(--fg-danger);    border: 1px solid rgba(239,68,68,0.3); }
+
+/* ── System Readiness rows ─────────────────────────────────────── */
+.readiness-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--fg-border);
+    transition: background 0.15s;
+    gap: 8px;
+}
+.readiness-ok      { background: rgba(34,197,94,0.04); }
+.readiness-warn    { background: rgba(245,158,11,0.05); }
+.readiness-partial { background: rgba(245,158,11,0.05); }
+.readiness-neutral { background: transparent; }
+.readiness-danger  { background: rgba(239,68,68,0.04); }
+.readiness-left {
+    display: flex; align-items: center; gap: 10px;
+    min-width: 0;
+}
+.readiness-right {
+    display: flex; align-items: center; gap: 6px;
+    flex-shrink: 0;
+    font-size: 0.85rem;
+}
+.readiness-step {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(99,102,241,0.15); color: var(--fg-primary-h);
+    font-size: 0.7rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.readiness-step-neutral {
+    background: var(--fg-border); color: var(--fg-muted);
+}
+.readiness-label {
+    font-size: 0.83rem; font-weight: 500;
+    color: var(--fg-text);
+    display: flex; align-items: center; gap: 4px;
+}
+.readiness-sub {
+    font-size: 0.72rem; margin-top: 1px;
+}
+.readiness-action {
+    color: var(--fg-primary-h); text-decoration: none; font-weight: 500;
+}
+.readiness-action:hover { text-decoration: underline; }
+.readiness-tip { font-size: 0.68rem; color: var(--fg-muted); }
+.readiness-badge {
+    font-size: 0.63rem; font-weight: 600;
+    padding: 2px 7px; border-radius: 99px;
+    white-space: nowrap;
+}
+.readiness-badge-ok      { background: rgba(34,197,94,0.15);  color: var(--fg-success); }
+.readiness-badge-warn    { background: rgba(245,158,11,0.2);  color: var(--fg-warning); }
+.readiness-badge-partial { background: rgba(245,158,11,0.2);  color: var(--fg-warning); }
+.readiness-badge-danger  { background: rgba(239,68,68,0.15);  color: var(--fg-danger); }
+.readiness-badge-link    {
+    background: rgba(99,102,241,0.15); color: var(--fg-primary-h);
+    text-decoration: none;
+}
+
+/* ── How-to-use guide steps ────────────────────────────────────── */
+.guide-step {
+    display: flex; gap: 10px;
+    margin-bottom: 10px;
+}
+.guide-step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--fg-border); color: var(--fg-muted);
+    font-size: 0.68rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+}
+.guide-step-num-active {
+    background: rgba(99,102,241,0.2); color: var(--fg-primary-h);
+}
+
+/* ── Detection result panel ────────────────────────────────────── */
+.detection-idle {
+    background: var(--fg-surface);
+    border: 1px dashed var(--fg-border);
+    border-radius: 10px; padding: 18px 16px;
+    color: var(--fg-muted); font-size: 0.83rem;
+    text-align: center;
+}
+</style>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // ── Config card selection ─────────────────────────────────────────────────
+    document.querySelectorAll('.config-card').forEach(function(card) {
+        card.addEventListener('click', function() {
+            document.querySelectorAll('.config-card').forEach(function(c) { c.classList.remove('selected'); });
+            card.classList.add('selected');
+            document.getElementById('detectionConfig').value = card.dataset.config;
+        });
+    });
+    document.getElementById('detectionConfig').value = 'RULES_ONLY';
+
+    // Tooltips auto-init via /js/finguard.js (FG.initTooltips).
+
+    // ── Idle placeholder ──────────────────────────────────────────────────────
+    function showIdle() {
+        var d = document.getElementById('detectionResult');
+        d.innerHTML = '<div class="detection-idle"><i class="bi bi-play-circle me-2"></i>Select a configuration and click <strong>Run Detection</strong> to start.</div>';
+    }
+    showIdle();
+
+    // ── Progress HTML builder ─────────────────────────────────────────────────
+    function detectionProgressHtml(jobId, phase, step, pct, processed, alerts, elapsed, error, configName) {
+        if (phase === 'FAILED') {
+            var hint = '';
+            if (error && error.toLowerCase().includes('model')) {
+                hint = '<div class="mt-2 small" style="color:var(--fg-muted)"><i class="bi bi-lightbulb me-1"></i>Hint: Go to <a href="/models" style="color:var(--fg-primary-h)">ML Models</a> and train models first, then re-run.</div>';
+            } else if (error && error.toLowerCase().includes('feature')) {
+                hint = '<div class="mt-2 small" style="color:var(--fg-muted)"><i class="bi bi-lightbulb me-1"></i>Hint: Run "Compute Features" on the <a href="/ingestion" style="color:var(--fg-primary-h)">Data Ingestion</a> page first.</div>';
+            }
+            return '<div style="background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.22);border-radius:10px;padding:14px">'
+                 + '<div class="d-flex align-items-center gap-2 mb-1">'
+                 + '<i class="bi bi-x-circle-fill text-danger"></i>'
+                 + '<strong class="text-danger">Detection failed</strong>'
+                 + (configName ? '<span class="badge ms-auto" style="background:rgba(239,68,68,0.12);color:var(--fg-danger);font-size:0.68rem">' + configName + '</span>' : '')
+                 + '</div>'
+                 + '<div class="text-muted small font-monospace mt-1" style="word-break:break-word">' + (error || 'Unknown error') + '</div>'
+                 + hint
+                 + '</div>';
+        }
+        if (phase === 'COMPLETED') {
+            return '<div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:14px">'
+                 + '<div class="d-flex align-items-center flex-wrap gap-2 mb-2">'
+                 + '<i class="bi bi-check-circle-fill text-success fs-5"></i>'
+                 + '<strong>Detection complete</strong>'
+                 + (configName ? '<span class="badge ms-1" style="background:rgba(34,197,94,0.15);color:var(--fg-success);font-size:0.68rem">' + configName + '</span>' : '')
+                 + '<span class="text-muted ms-auto" style="font-size:0.8rem">' + elapsed + 's</span>'
+                 + '</div>'
+                 + '<div class="d-flex gap-4 mb-3" style="font-size:0.85rem">'
+                 + '<div><div class="text-muted" style="font-size:0.72rem">ANALYZED</div><strong>' + processed.toLocaleString() + '</strong></div>'
+                 + '<div><div class="text-muted" style="font-size:0.72rem">ALERTS CREATED</div><strong class="text-warning">' + alerts.toLocaleString() + '</strong></div>'
+                 + '</div>'
+                 + '<a href="/alerts" class="btn btn-outline-secondary btn-sm">'
+                 + '<i class="bi bi-eye me-1"></i>View Alerts</a>'
+                 + '</div>';
+        }
+        // RUNNING / PENDING
+        var barClass = pct > 0 ? 'bg-primary' : 'bg-primary progress-bar-striped progress-bar-animated';
+        var barLabel = pct > 0 ? pct + '%' : 'Starting\u2026';
+        return '<div style="background:var(--fg-surface);border:1px solid var(--fg-border);border-radius:10px;padding:14px">'
+             + '<div class="d-flex justify-content-between align-items-center mb-2">'
+             + '<div class="d-flex align-items-center gap-2">'
+             + '<span class="badge bg-primary"><i class="bi bi-search me-1"></i>Running</span>'
+             + (configName ? '<span class="text-muted" style="font-size:0.78rem">' + configName + '</span>' : '')
+             + '</div>'
+             + '<span class="text-muted" style="font-size:0.78rem">' + elapsed + 's elapsed</span>'
+             + '</div>'
+             + '<div class="progress mb-2" style="height:13px;border-radius:6px">'
+             + '<div class="progress-bar ' + barClass + '" style="width:' + (pct || 100) + '%;font-size:0.67rem;line-height:13px">' + barLabel + '</div>'
+             + '</div>'
+             + '<div class="small d-flex gap-3" style="color:var(--fg-muted)">'
+             + (processed > 0
+                 ? '<span><i class="bi bi-cpu me-1"></i>' + processed.toLocaleString() + ' analyzed</span>'
+                   + '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' + alerts.toLocaleString() + ' alerts</span>'
+                 : '<span><i class="bi bi-hourglass-split me-1"></i>Preparing\u2026</span>')
+             + '</div>'
+             + '</div>';
+    }
+
+    // ── Elapsed time helper ───────────────────────────────────────────────────
+    function elapsedSeconds(startedAt) {
+        if (!startedAt) return 0;
+        return Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
+    }
+
+    // ── Polling loop ──────────────────────────────────────────────────────────
+    function startDetectionPolling(jobId, resultDiv, btn, configName) {
+        localStorage.setItem('fg_detection_job', jobId);
+        localStorage.setItem('fg_detection_config', configName || '');
+
+        var stopped = false;
+        var intervalId = setInterval(async function() {
+            if (stopped) return;
+            try {
+                var res = await fetch('/api/v1/detection/status/' + jobId);
+                if (!res.ok) { stopped = true; clearInterval(intervalId); return; }
+                var s = await res.json();
+                var elapsed = elapsedSeconds(s.startedAt);
+                resultDiv.innerHTML = detectionProgressHtml(
+                    jobId, s.phase, s.currentStep, s.progressPercent,
+                    s.processed, s.alertsCreated, elapsed, s.error, configName
+                );
+                if (s.phase === 'COMPLETED' || s.phase === 'FAILED') {
+                    stopped = true;
+                    clearInterval(intervalId);
+                    localStorage.removeItem('fg_detection_job');
+                    localStorage.removeItem('fg_detection_config');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Detection';
+                }
+            } catch (e) {
+                stopped = true;
+                clearInterval(intervalId);
+                localStorage.removeItem('fg_detection_job');
+                localStorage.removeItem('fg_detection_config');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Detection';
+            }
+        }, 2000);
+    }
+
+        // ── Resume / restore on page load ────────────────────────────
+    document.addEventListener('DOMContentLoaded', async function() {
+        var savedId     = localStorage.getItem('fg_detection_job');
+        var savedConfig = localStorage.getItem('fg_detection_config') || '';
+        if (!savedId) return;
+
+        var resultDiv = document.getElementById('detectionResult');
+
+        try {
+            var res = await fetch('/api/v1/detection/status/' + savedId);
+            if (!res.ok) {
+                localStorage.removeItem('fg_detection_job');
+                localStorage.removeItem('fg_detection_config');
+                return;
+            }
+            var s = await res.json();
+
+            if (s.phase === 'COMPLETED' || s.phase === 'FAILED') {
+                var elapsedSec = (s.startedAt && s.completedAt)
+                    ? Math.round((new Date(s.completedAt) - new Date(s.startedAt)) / 1000)
+                    : null;
+                resultDiv.innerHTML = detectionProgressHtml(
+                    savedId, s.phase, s.currentStep, s.progressPercent,
+                    s.processed, s.alertsCreated, elapsedSec, s.error, savedConfig
+                );
+                var note = document.createElement('div');
+                note.className = 'text-muted mt-2';
+                note.style.fontSize = '0.75rem';
+                note.innerHTML = '<i class="bi bi-clock-history me-1"></i>Result from previous run — start a new detection to clear.';
+                resultDiv.appendChild(note);
+                return;
+            }
+
+            // Still running — re-attach polling
+            var btn = document.getElementById('runDetectionBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-stop-fill me-1"></i>Running…';
+            startDetectionPolling(savedId, resultDiv, btn, savedConfig);
+
+        } catch (e) {
+            localStorage.removeItem('fg_detection_job');
+        }
+    });
+
+    // ── Run button ────────────────────────────────────────────────────────────
+    document.getElementById('runDetectionBtn').addEventListener('click', async function() {
+        var btn = document.getElementById('runDetectionBtn');
+        var resultDiv = document.getElementById('detectionResult');
+        var config = document.getElementById('detectionConfig').value;
+        var limitVal = document.getElementById('limitInput').value.trim();
+
+        // Human-readable config name
+        var selectedCard = document.querySelector('.config-card.selected');
+        var configName = selectedCard
+            ? selectedCard.querySelector('.cfg-name').textContent.trim()
+            : config;
+
+        var url = '/api/v1/detection/run/async?config=' + config;
+        if (limitVal && parseInt(limitVal) > 0) url += '&limit=' + parseInt(limitVal);
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Submitting\u2026';
+        resultDiv.innerHTML = '';
+        localStorage.removeItem('fg_detection_job');
+        localStorage.removeItem('fg_detection_config');
+
+        try {
+            var res = await fetch(url, { method: 'POST' });
+            var data = await res.json();
+            if (!res.ok) {
+                resultDiv.innerHTML = '<div style="background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.22);border-radius:10px;padding:14px">'
+                    + '<div class="d-flex align-items-center gap-2"><i class="bi bi-x-circle-fill text-danger"></i>'
+                    + '<strong class="text-danger">Request failed</strong></div>'
+                    + '<div class="text-muted small mt-1">' + (data.detail || data.message || JSON.stringify(data)) + '</div>'
+                    + '</div>';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Detection';
+                return;
+            }
+            btn.innerHTML = '<i class="bi bi-stop-fill me-1"></i>Running\u2026';
+            startDetectionPolling(data.jobId, resultDiv, btn, configName);
+        } catch (err) {
+            resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0 small"><i class="bi bi-x-circle me-1"></i>' + err.message + '</div>';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Detection';
+        }
+    });
+</script>
+</body>
+</html>

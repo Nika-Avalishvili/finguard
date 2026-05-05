@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Evaluation')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header d-flex justify-content-between align-items-center">
+        <div>
+            <h1><i class="bi bi-graph-up me-2"></i>Evaluation</h1>
+            <p class="mb-0">
+                Run the detection pipeline against ground-truth data and compare
+                precision, recall, F1, and CAKR explanation quality across the 5 configurations.
+            </p>
+        </div>
+        <div th:if="${!results.isEmpty()}" class="d-flex gap-2 align-items-center">
+            <!-- Jump to side-by-side comparison view for a named experiment -->
+            <div class="dropdown" th:if="${experimentNames != null and !experimentNames.isEmpty()}">
+                <button class="btn btn-outline-primary btn-sm dropdown-toggle"
+                        type="button" data-bs-toggle="dropdown"
+                        data-bs-toggle-secondary="tooltip"
+                        title="Open the side-by-side comparison view for a named experiment run.">
+                    <i class="bi bi-columns-gap me-1"></i>Compare runs
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li th:each="name : ${experimentNames}">
+                        <a class="dropdown-item" th:href="@{/evaluation/compare/{n}(n=${name})}"
+                           th:text="${name}">experiment-name</a>
+                    </li>
+                </ul>
+            </div>
+            <button class="btn btn-outline-danger btn-sm" id="deleteAllBtn"
+                    title="Delete all experiment results">
+                <i class="bi bi-trash3 me-1"></i>Delete All Results
+            </button>
+        </div>
+    </div>
+
+    <!-- Pre-flight readiness — pops above the form when the run will produce
+         garbage (no transactions / no features / no test set / no trained models).
+         Each row links to the page that fixes it so the user can act in one click. -->
+    <div th:if="${preflightNoTransactions || preflightNoFeatures || preflightNoTestSet || preflightNoModels}"
+         class="alert alert-warning border-start border-warning border-4 mb-3" role="alert">
+        <div class="d-flex align-items-start gap-3">
+            <i class="bi bi-exclamation-triangle-fill flex-shrink-0" style="font-size:1.25rem;color:#fbbf24"></i>
+            <div class="flex-grow-1">
+                <strong>Heads up — your evaluation will produce empty / zero metrics.</strong>
+                <ul class="mb-0 mt-1 small">
+                    <li th:if="${preflightNoTransactions}">
+                        <strong>No transactions imported yet.</strong>
+                        <a th:href="@{/ingestion}" class="text-warning fw-semibold">→ Import data</a>
+                    </li>
+                    <li th:if="${preflightNoFeatures}">
+                        <strong>Features not computed.</strong>
+                        Detection will fall back to defaults and metrics will be misleading.
+                        <a th:href="@{/ingestion}" class="text-warning fw-semibold">→ Compute features</a>
+                    </li>
+                    <li th:if="${preflightNoTestSet}">
+                        <strong>Test set is empty</strong> — every row is currently flagged
+                        <code>is_training_set = TRUE</code>. Without a held-out test set, all four
+                        detection metrics (Precision / Recall / F1 / FPR) compute against zero
+                        denominators and come back as <code>0</code>.
+                        <a th:href="@{/ingestion}" class="text-warning fw-semibold">→ Click "Finalize Split" on the Ingestion page</a>
+                    </li>
+                    <li th:if="${preflightNoModels}">
+                        <strong>ML models not trained.</strong> Configs that depend on ML
+                        (everything except <code>RULES_ONLY</code>) will skip detection.
+                        <a th:href="@{/models}" class="text-warning fw-semibold">→ Train models</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job status banner — live progress for async runs. The `.active` CSS
+         class (added by startPolling) flips display:flex. We DO NOT use
+         inline `display:none!important` here because inline `!important`
+         beats stylesheet `!important` and would lock the banner hidden
+         forever — that was the bug behind issues #3+#4 in the audit
+         (cancel button + benchmark progress invisible). -->
+    <div id="jobStatusBanner" class="alert alert-info mb-3">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span id="jobStatusSpinner" class="spinner-border spinner-border-sm flex-shrink-0"></span>
+            <strong id="jobStatusText">Experiment running...</strong>
+            <span id="jobProgressText" class="ms-auto fw-bold" style="font-variant-numeric:tabular-nums"></span>
+            <button id="jobCancelBtn" type="button"
+                    class="btn btn-sm btn-outline-danger ms-2"
+                    title="Stop the running job at the next safe phase boundary">
+                <i class="bi bi-stop-fill me-1"></i>Cancel
+            </button>
+        </div>
+        <div class="progress" style="height:8px;background:rgba(255,255,255,0.08)">
+            <div id="jobProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-info"
+                 role="progressbar" style="width:0%"></div>
+        </div>
+        <div class="small text-muted mt-2 d-flex justify-content-between flex-wrap gap-2">
+            <span id="jobProgressCount" style="font-variant-numeric:tabular-nums"></span>
+            <span id="jobProgressEta" style="font-variant-numeric:tabular-nums"></span>
+        </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- Unified experiment form — mode toggle selects single/compare/kfold/bench -->
+    <!-- ==================================================================== -->
+    <div class="card mb-4">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <span>
+                <i class="bi bi-play-circle me-2"></i>Run Experiment
+                <i class="bi bi-question-circle info-hint"
+                   data-bs-toggle="tooltip"
+                   title="Four modes: Single (one config), Compare (5 configs side-by-side), k-fold CV (one config, k fold splits), Benchmark (k-fold × all 5 configs — the thesis evaluation table)."></i>
+            </span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Experiment mode">
+                <input type="radio" class="btn-check" name="runMode" id="modeSingle" value="single" checked>
+                <label class="btn btn-outline-primary" for="modeSingle"
+                       title="One config, one split — quick sanity check. Produces 1 result row.">
+                    <i class="bi bi-1-circle"></i> One Run
+                </label>
+
+                <input type="radio" class="btn-check" name="runMode" id="modeCompare" value="compare">
+                <label class="btn btn-outline-primary" for="modeCompare"
+                       title="Runs all 5 configs back-to-back so you can compare them on the same data. Produces 5 result rows.">
+                    <i class="bi bi-columns-gap"></i> All 5 Configs
+                </label>
+
+                <input type="radio" class="btn-check" name="runMode" id="modeKfold" value="kfold">
+                <label class="btn btn-outline-primary" for="modeKfold"
+                       title="Statistical validation — splits data into k folds, runs one config k times so you can report mean ± stddev. Produces k fold rows + 1 summary row.">
+                    <i class="bi bi-grid-3x3-gap"></i> Statistical Validation
+                </label>
+
+                <input type="radio" class="btn-check" name="runMode" id="modeBenchmark" value="benchmark">
+                <label class="btn btn-outline-primary" for="modeBenchmark"
+                       title="The full thesis evaluation table: all 5 configs × k folds, with summaries. Produces 5×(k+1) result rows. Can take hours.">
+                    <i class="bi bi-speedometer"></i> Thesis Benchmark
+                </label>
+            </div>
+        </div>
+        <div class="card-body">
+            <p id="modeDescription" class="text-muted small mb-3">
+                Run detection once against a single config and persist the metrics.
+            </p>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold" for="expName">Experiment Name</label>
+                    <input type="text" class="form-control" id="expName" placeholder="e.g., thesis-final">
+                </div>
+                <div class="col-md-4" id="configField">
+                    <label class="form-label fw-semibold" for="expConfig">
+                        Detection Config
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Rules Only → ML Only → ML+LLM Direct → ML+LLM+RAG → Full System. Each adds one layer. Disabled in Compare / Benchmark modes (runs all 5)."></i>
+                    </label>
+                    <select class="form-select" id="expConfig">
+                        <option th:each="c : ${configs}" th:value="${c}" th:text="${c.displayName}">CONFIG</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold" for="expDataset">Dataset</label>
+                    <select class="form-select" id="expDataset">
+                        <option th:each="ds : ${datasets}" th:value="${ds}" th:text="${ds.displayName}">DS</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-md-4" id="kField" style="display:none">
+                    <label class="form-label fw-semibold" for="kValue">
+                        k (folds)
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Number of cross-validation folds. Typical: 5 or 10. Higher = tighter mean±stddev estimates but longer wall-clock."></i>
+                    </label>
+                    <input type="number" class="form-control" id="kValue" value="5" min="2" max="20">
+                </div>
+                <div class="col-md-4" id="maxAlertsField">
+                    <label class="form-label fw-semibold" for="maxAlerts">
+                        Max Alerts to Explain
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Upper cap on how many alerts receive an LLM-generated explanation. Prevents runaway jobs on configs that flag hundreds of thousands of alerts — defaults to 500 which is enough for a representative CAKR sample. Max 10 000."></i>
+                    </label>
+                    <input type="number" class="form-control" id="maxAlerts" value="500" min="1" max="10000">
+                    <div class="form-text" style="font-size:0.7rem">LLM cost cap — 500 gives ~statistically valid CAKR.</div>
+                </div>
+                <div class="col-md-4" id="maxExplField">
+                    <label class="form-label fw-semibold" for="maxExpl">
+                        CAKR Scoring Limit
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="How many generated explanations the LLM judge will CAKR-score (1–500). Should be ≤ Max Alerts to Explain. Lower = cheaper; higher = more representative sample."></i>
+                    </label>
+                    <input type="number" class="form-control" id="maxExpl" value="50" min="1" max="500">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold d-block">CAKR Scoring</label>
+                    <div class="form-check form-switch d-flex align-items-center gap-2 mt-2"
+                         style="padding-left: 2.5em">
+                        <input class="form-check-input" type="checkbox" id="scoreExplanations"
+                               style="margin-left:-2.5em;width:2.5em;height:1.25em;cursor:pointer">
+                        <label class="form-check-label flex-grow-1 mb-0" for="scoreExplanations"
+                               style="cursor:pointer">
+                            Use LLM judge to score explanations
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Uses the active LLM as a judge to rate each explanation on Completeness, Actionability, Correctness (knowledge-grounded), and Regulatory relevance (1–5 scale). Adds one LLM call per explanation scored — see 'CAKR Scoring Limit' to cap the cost."></i>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary mt-3" id="runExpBtn">
+                <i class="bi bi-play-fill me-1"></i><span id="runBtnLabel">Run Experiment</span>
+            </button>
+            <div id="expResult" class="mt-3" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- Analytics panels: CAKR radar + cost breakdown + hallucination table   -->
+    <!-- ==================================================================== -->
+    <div class="row g-3 mb-4">
+        <div class="col-xl-5 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-diagram-3 me-2"></i>CAKR Dimensions by Config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Per-dimension CAKR averages for every detection config. Each polygon is one config; each axis is one of the four CAKR dimensions (1–5)."></i>
+                </div>
+                <div class="card-body">
+                    <div id="noCakrData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-diagram-3"></i></div>
+                        <div class="empty-state__title">No CAKR-scored explanations yet</div>
+                        <div class="empty-state__hint">Run an experiment with "Score explanations" checked.</div>
+                    </div>
+                    <canvas id="cakrRadarChart" style="max-height:300px"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-7 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-coin me-2"></i>LLM Cost &amp; Latency by Config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Pairs with the CAKR radar to answer: is RAG's extra token/latency overhead worth the quality gain?"></i>
+                </div>
+                <div class="card-body p-0">
+                    <div id="noCostData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-coin"></i></div>
+                        <div class="empty-state__title">No LLM calls yet</div>
+                        <div class="empty-state__hint">Run an experiment with an LLM config (Direct / RAG / Full System).</div>
+                    </div>
+                    <div class="table-responsive" id="costTableWrap">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                            <tr>
+                                <th>Config</th>
+                                <th class="text-end">Calls</th>
+                                <th class="text-end">Total&nbsp;Tokens</th>
+                                <th class="text-end">Avg&nbsp;Prompt</th>
+                                <th class="text-end">Avg&nbsp;Completion</th>
+                                <th class="text-end">Avg&nbsp;Latency</th>
+                                <th class="text-end">p95&nbsp;Latency</th>
+                            </tr>
+                            </thead>
+                            <tbody id="costTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-shield-exclamation me-2"></i>Hallucination Flags by Config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Frequency of each hallucination flag type per detection config — the failure-mode breakdown for the thesis reliability chapter."></i>
+                </div>
+                <div class="card-body p-0">
+                    <div id="noHallucData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-shield-exclamation"></i></div>
+                        <div class="empty-state__title">No hallucinations flagged</div>
+                        <div class="empty-state__hint">Either no LLM explanations were generated, or the HallucinationValidator found them all consistent.</div>
+                    </div>
+                    <div class="table-responsive" id="hallucTableWrap">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                            <tr>
+                                <th>Config</th>
+                                <th id="hallucFlagHeaders"></th>
+                            </tr>
+                            </thead>
+                            <tbody id="hallucTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================================== -->
+        <!-- Cost-vs-Quality scatter — the thesis money chart: is RAG's extra token   -->
+        <!-- spend worth the CAKR gain? Overlays /cost-breakdown and /cakr-breakdown. -->
+        <!-- ======================================================================== -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>
+                        <i class="bi bi-graph-up me-2"></i>Quality vs. Cost — Pareto View
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Each dot is one detection config. X = avg explanation latency (ms). Y = overall CAKR score (1–5). Top-left corner is the ideal: cheap + high quality. Configs that dominate others on both axes sit on the Pareto frontier."></i>
+                    </span>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Cost axis">
+                        <input type="radio" class="btn-check" name="costAxis" id="costLatency" value="latency" checked>
+                        <label class="btn btn-outline-secondary" for="costLatency"
+                               data-bs-toggle="tooltip"
+                               title="X-axis: average wall-clock time per LLM call (ms).">Latency</label>
+
+                        <input type="radio" class="btn-check" name="costAxis" id="costTokens" value="tokens">
+                        <label class="btn btn-outline-secondary" for="costTokens"
+                               data-bs-toggle="tooltip"
+                               title="X-axis: average prompt + completion tokens per call. Proxy for API cost.">Tokens</label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="noParetoData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-graph-up"></i></div>
+                        <div class="empty-state__title">Not enough data yet</div>
+                        <div class="empty-state__hint">
+                            Run an experiment with <code>scoreExplanations=true</code> on an LLM config so
+                            CAKR scores and latency/token counts are both populated.
+                        </div>
+                    </div>
+                    <canvas id="paretoChart" style="max-height:340px"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- Metric guide (now using the design-system .metric-tile classes)       -->
+    <!-- ==================================================================== -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center"
+             style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#metricGuide"
+             aria-expanded="false" aria-controls="metricGuide">
+            <span><i class="bi bi-info-circle me-2"></i>Understanding the Metrics</span>
+            <i class="bi bi-chevron-down"></i>
+        </div>
+        <div class="collapse" id="metricGuide">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--primary" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem;color:var(--fg-primary-h)">
+                                <i class="bi bi-bullseye me-1"></i>Precision
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Of all transactions the system flagged as fraud, what fraction were actually fraud?<br>
+                                <span class="metric-good">≥ 0.80 good</span> — fewer false alarms.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--success" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem;color:var(--fg-success)">
+                                <i class="bi bi-search me-1"></i>Recall
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Of all actual fraud, what fraction did the system catch?<br>
+                                <span class="metric-good">≥ 0.80 good</span> — fewer frauds slip through.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--primary" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem">
+                                <i class="bi bi-star me-1"></i>F1 Score
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Harmonic mean of Precision &amp; Recall.<br>
+                                <span class="metric-good">≥ 0.80 excellent</span> ·
+                                <span class="metric-medium">0.50–0.79 acceptable</span> ·
+                                <span class="metric-bad">&lt; 0.50 poor</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--danger" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem;color:var(--fg-danger)">
+                                <i class="bi bi-exclamation-triangle me-1"></i>False Positive Rate
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Fraction of legit transactions wrongly flagged. <strong>Lower is better.</strong><br>
+                                <span class="metric-good">≤ 0.10 good</span> ·
+                                <span class="metric-bad">&gt; 0.30 alert fatigue</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--warning" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem;color:var(--fg-warning)">
+                                <i class="bi bi-clipboard-check me-1"></i>CAKR (1–5)
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                LLM-as-judge score on <strong>C</strong>ompleteness, <strong>A</strong>ctionability,
+                                <strong>K</strong>nowledge, <strong>R</strong>egulatory.<br>
+                                <span class="metric-good">≥ 4.0 excellent</span> ·
+                                <span class="metric-bad">&lt; 2.5 poor</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--info" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem;color:var(--fg-info)">
+                                <i class="bi bi-shield-check me-1"></i>Hallucination Rate
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Share of explanations with factual errors (wrong amounts, invented accounts, etc.).<br>
+                                <span class="metric-good">≤ 10% safe</span> ·
+                                <span class="metric-bad">&gt; 30% unreliable</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--warning" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem;color:var(--fg-warning)">
+                                <i class="bi bi-layers me-1"></i>Fold
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Which slice of data was held out as the test set for that row (k-fold cross-validation).<br>
+                                <span class="metric-good"><code>0..k-1</code> = per-fold result</span> ·
+                                <span class="metric-medium"><code>—</code> (empty) = summary row (mean across folds)</span><br>
+                                <span class="text-muted">Always quote the summary row in the thesis — it reflects stability across splits, not a single lucky slice.</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="metric-tile metric-tile--primary" style="align-items:flex-start;text-align:left">
+                            <div class="metric-tile__value" style="font-size:1rem">
+                                <i class="bi bi-bell me-1"></i>Alerts
+                            </div>
+                            <div class="metric-tile__label" style="text-align:left;margin-top:0.5rem;font-size:0.8rem;color:var(--fg-muted)">
+                                Number of anomalies the pipeline flagged on the test set for this config / fold.<br>
+                                <span class="text-muted">Should be roughly proportional across configs that share a detection backbone
+                                (<code>ML_ONLY</code>, <code>ML_LLM_DIRECT</code>, <code>ML_LLM_RAG</code> all use the same ML step).</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interpret Modal -->
+    <div class="modal fade" id="interpretModal" tabindex="-1" aria-labelledby="interpretModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="interpretModalLabel">
+                        <i class="bi bi-lightbulb me-2 text-warning"></i>Result Interpretation
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="interpretContext" class="mb-3 p-2 rounded bg-light small text-muted"></div>
+                    <div id="interpretLoading" class="text-center py-4">
+                        <div class="spinner-border text-primary mb-2"></div>
+                        <div class="small text-muted">Asking the LLM to interpret these results...</div>
+                    </div>
+                    <div id="interpretContent" class="d-none">
+                        <div class="alert alert-light border p-3" id="interpretText" style="white-space:pre-wrap;line-height:1.7"></div>
+                    </div>
+                    <div id="interpretError" class="d-none">
+                        <div class="alert alert-warning" id="interpretErrorText"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty state -->
+    <div class="card" th:if="${results.isEmpty()}">
+        <div class="card-body">
+            <div class="empty-state">
+                <div class="empty-state__icon"><i class="bi bi-bar-chart"></i></div>
+                <div class="empty-state__title">No experiment results yet</div>
+                <div class="empty-state__hint">
+                    Pick a mode above and run an experiment — the results table will populate here.
+                    Try <strong>Full Benchmark</strong> for the complete thesis evaluation table in one click.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Table -->
+    <div class="card" th:if="${!results.isEmpty()}">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span><i class="bi bi-table me-2"></i>Experiment Results
+                <span class="badge bg-secondary ms-1" th:text="${results.size()}">0</span>
+            </span>
+            <div class="d-flex align-items-center gap-2">
+                <small class="text-muted me-2">
+                    Colour:
+                    <span class="badge metric-good">≥0.8</span>
+                    <span class="badge metric-medium">0.5–0.8</span>
+                    <span class="badge metric-bad">&lt;0.5</span>
+                </small>
+                <!-- Bulk-delete controls — appear only after user ticks at least one row -->
+                <button class="btn btn-sm btn-outline-danger" id="deleteSelectedBtn"
+                        style="display:none"
+                        title="Delete all ticked rows (from any experiment).">
+                    <i class="bi bi-trash me-1"></i><span id="deleteSelectedCount">0</span> selected
+                </button>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-warning dropdown-toggle"
+                            type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                            title="Delete every row belonging to one named experiment.">
+                        <i class="bi bi-trash3 me-1"></i>Delete experiment
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" id="deleteExperimentMenu">
+                        <li><span class="dropdown-item-text text-muted small">Loading…</span></li>
+                    </ul>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" id="deleteAllResultsBtn"
+                        title="Delete every row in experiment_results — destructive, irreversible.">
+                    <i class="bi bi-trash-fill me-1"></i>Delete all
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0" id="resultsTable">
+                    <thead class="table-dark">
+                    <tr>
+                        <th style="width:34px" title="Tick to select for bulk delete">
+                            <input type="checkbox" id="selectAllRows" class="form-check-input">
+                        </th>
+                        <th>Experiment</th>
+                        <th>Config</th>
+                        <th title="Fold — which slice of data was the held-out test set for this row. 0..k-1 = individual folds; '—' = summary row with mean across folds (the one to cite in the thesis).">Fold <i class="bi bi-info-circle small text-muted" style="font-size:0.7rem"></i></th>
+                        <th>Dataset</th>
+                        <th title="Precision — fraction of flagged transactions that are actually fraud. Higher = fewer false alarms.">Pre</th>
+                        <th title="Recall — fraction of actual fraud the system caught. Higher = fewer frauds slipping through.">Rec</th>
+                        <th title="F1 Score — harmonic mean of precision and recall. Best single-number summary." class="fw-bold">F1</th>
+                        <th title="False Positive Rate — lower is better. Fraction of legitimate transactions wrongly flagged.">FPR</th>
+                        <th title="Average CAKR (1–5) — LLM-as-judge score across Completeness, Actionability, Correctness, Regulatory dimensions.">CAKR</th>
+                        <th title="Hallucination rate — share of explanations flagged as factually incorrect.">Halluc.</th>
+                        <th title="Average explanation latency in milliseconds.">Latency</th>
+                        <th title="Total transactions in the test set for this row.">Txns</th>
+                        <th title="Number of anomalies flagged on the test set.">Alerts</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="r : ${results}" th:id="'row-' + ${r.id}"
+                        th:classappend="${r.fold == null} ? 'summary-row'">
+                        <td>
+                            <input type="checkbox" class="form-check-input row-checkbox"
+                                   th:value="${r.id}" aria-label="Select this row">
+                        </td>
+                        <td class="fw-semibold" th:text="${r.experimentName}">exp</td>
+                        <td>
+                            <span class="badge"
+                                  th:classappend="${r.config.name() == 'FULL_SYSTEM'} ? 'bg-success' :
+                                                  (${r.config.name() == 'ML_LLM_RAG'} ? 'bg-primary' :
+                                                  (${r.config.name() == 'ML_LLM_DIRECT'} ? 'bg-info text-dark' :
+                                                  (${r.config.name() == 'ML_ONLY'} ? 'bg-warning text-dark' : 'bg-secondary')))"
+                                  th:text="${r.config}">CONFIG</span>
+                        </td>
+                        <td class="text-muted small">
+                            <span th:if="${r.fold != null}"
+                                  class="badge bg-dark border border-secondary"
+                                  th:title="'Per-fold result (fold ' + ${r.fold} + ' was held out as test set).'"
+                                  th:text="${'fold ' + r.fold}">fold</span>
+                            <span th:unless="${r.fold != null}"
+                                  class="badge bg-warning text-dark"
+                                  title="Summary row — metrics are the MEAN across all folds. Cite this row in the thesis.">
+                                <i class="bi bi-star-fill me-1" style="font-size:0.65rem"></i>summary
+                            </span>
+                        </td>
+                        <td class="text-muted small" th:text="${r.dataset}">DS</td>
+                        <td th:with="v=${r.precisionScore}"
+                            th:classappend="${v != null and v >= 0.8} ? 'metric-good' : (${v != null and v >= 0.5} ? 'metric-medium' : 'metric-bad')"
+                            th:text="${v != null ? #numbers.formatDecimal(v, 1, 3) : '—'}">—</td>
+                        <td th:with="v=${r.recallScore}"
+                            th:classappend="${v != null and v >= 0.8} ? 'metric-good' : (${v != null and v >= 0.5} ? 'metric-medium' : 'metric-bad')"
+                            th:text="${v != null ? #numbers.formatDecimal(v, 1, 3) : '—'}">—</td>
+                        <td class="fw-bold"
+                            th:with="v=${r.f1Score}"
+                            th:classappend="${v != null and v >= 0.8} ? 'metric-good' : (${v != null and v >= 0.5} ? 'metric-medium' : 'metric-bad')"
+                            th:text="${v != null ? #numbers.formatDecimal(v, 1, 3) : '—'}">—</td>
+                        <td th:with="v=${r.falsePositiveRate}"
+                            th:classappend="${v != null and v <= 0.1} ? 'metric-good' : (${v != null and v <= 0.3} ? 'metric-medium' : 'metric-bad')"
+                            th:text="${v != null ? #numbers.formatDecimal(v, 1, 3) : '—'}">—</td>
+                        <td th:with="v=${r.avgCakrScore}"
+                            th:classappend="${v != null and v >= 4.0} ? 'metric-good' : (${v != null and v >= 2.5} ? 'metric-medium' : (${v != null} ? 'metric-bad' : ''))"
+                            th:text="${v != null ? #numbers.formatDecimal(v, 1, 2) : '—'}">—</td>
+                        <td th:with="v=${r.hallucinationRate}"
+                            th:classappend="${v != null and v <= 0.1} ? 'metric-good' : (${v != null and v <= 0.3} ? 'metric-medium' : (${v != null} ? 'metric-bad' : ''))"
+                            th:text="${v != null ? #numbers.formatDecimal(v * 100, 1, 1) + '%' : '—'}">—</td>
+                        <td class="text-muted small"
+                            th:text="${r.avgLatencyMs != null ? #numbers.formatDecimal(r.avgLatencyMs, 1, 0) + 'ms' : '—'}">—</td>
+                        <td class="text-muted small" th:text="${#numbers.formatInteger(r.totalTransactions, 1, 'COMMA')}">0</td>
+                        <td class="text-muted small" th:text="${#numbers.formatInteger(r.totalAlerts, 1, 'COMMA')}">0</td>
+                        <td class="text-nowrap">
+                            <a class="btn btn-outline-primary btn-xs me-1"
+                               th:href="@{/evaluation/compare/{n}(n=${r.experimentName})}"
+                               title="Open side-by-side comparison view for this experiment (all configs, pivoted).">
+                                <i class="bi bi-columns-gap"></i>
+                            </a>
+                            <button class="btn btn-outline-warning btn-xs interpret-btn me-1"
+                                    th:data-id="${r.id}"
+                                    th:data-name="${r.experimentName}"
+                                    th:data-config="${r.config}"
+                                    title="Interpret these results with LLM">
+                                <i class="bi bi-lightbulb"></i>
+                            </button>
+                            <button class="btn btn-outline-danger btn-xs delete-row-btn"
+                                    th:data-id="${r.id}"
+                                    title="Delete this result">
+                                <i class="bi bi-trash3"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<style>
+/* Metric colour scale — stronger contrast so cells pop in the table.
+   Higher specificity (table > tbody > tr > td.metric-X) is needed because
+   Bootstrap's .table-hover applies its own bg / colour to td and would
+   otherwise outweigh a flat .metric-good rule. */
+.metric-good                             { color: #4ade80; font-weight: 700; }
+.metric-medium                           { color: #fbbf24; font-weight: 700; }
+.metric-bad                              { color: #f87171; font-weight: 700; }
+table#resultsTable > tbody > tr > td.metric-good   { color: #4ade80 !important; font-weight: 700; background: rgba(74,222,128,0.18); }
+table#resultsTable > tbody > tr > td.metric-medium { color: #fbbf24 !important; font-weight: 700; background: rgba(251,191,36,0.18); }
+table#resultsTable > tbody > tr > td.metric-bad    { color: #f87171 !important; font-weight: 700; background: rgba(248,113,113,0.18); }
+/* Hover over a coloured cell shouldn't wash the colour out. */
+table#resultsTable > tbody > tr:hover > td.metric-good,
+table#resultsTable > tbody > tr:hover > td.metric-medium,
+table#resultsTable > tbody > tr:hover > td.metric-bad { filter: brightness(1.15); }
+
+/* Summary rows (k-fold means) get a gentle tinted background + top border so they
+   visually separate each experiment's "headline" number from its per-fold detail. */
+#resultsTable tr.summary-row {
+    background: rgba(217,119,6,0.06);
+    border-top: 2px solid rgba(217,119,6,0.25);
+}
+#resultsTable tr.summary-row td { font-weight: 600; }
+
+.btn-xs { padding: 0.1rem 0.35rem; font-size: 0.75rem; }
+#jobStatusBanner { display: none; }
+#jobStatusBanner.active { display: flex !important; }
+</style>
+<script>
+// Chart.js defaults and COLORS come from /js/finguard.js (loaded in the layout fragment).
+const COLORS = FG.COLORS;
+
+// ── Mode toggle: configure fields + button label per mode ────────────
+const modeDescriptions = {
+    single:    '<strong>One Run</strong> — quickest option. Runs detection + evaluation once on one config with a simple 80/20 train/test split. Good for a fast sanity check while you iterate. <em>Produces 1 result row.</em>',
+    compare:   '<strong>All 5 Configs</strong> — runs RULES_ONLY → ML_ONLY → ML_LLM_DIRECT → ML_LLM_RAG → FULL_SYSTEM back-to-back on the same data so you can compare them fairly. <em>Produces 5 result rows.</em>',
+    kfold:     '<strong>Statistical Validation (k-fold cross-validation)</strong> — splits data into k equal folds and runs one config k times, each time holding a different fold out as the test set. Lets you report <em>mean ± stddev</em> instead of a single lucky number — what thesis reviewers expect. <em>Produces k fold rows + 1 summary row.</em>',
+    benchmark: '<strong>Thesis Benchmark</strong> — all 5 configs × k folds in one go. The defensible "final table" for your evaluation chapter. Can take hours — kick off overnight. <em>Produces 5 × (k + 1) result rows.</em>'
+};
+const runLabels = {
+    single: 'Run One Experiment',
+    compare: 'Run All 5 Configs',
+    kfold: 'Run Statistical Validation',
+    benchmark: 'Run Thesis Benchmark'
+};
+
+const runBtn = document.getElementById('runExpBtn');
+const runBtnLabel = document.getElementById('runBtnLabel');
+const configField = document.getElementById('configField');
+const configSelect = document.getElementById('expConfig');
+const kField = document.getElementById('kField');
+const modeDesc = document.getElementById('modeDescription');
+
+function applyMode() {
+    const mode = document.querySelector('input[name="runMode"]:checked').value;
+    // innerHTML — descriptions include <strong>/<em> formatting by design, no user input
+    modeDesc.innerHTML = modeDescriptions[mode];
+    runBtnLabel.textContent = runLabels[mode];
+
+    // Config picker is hidden when running all configs.
+    const needsConfig = (mode === 'single' || mode === 'kfold');
+    configField.style.display = needsConfig ? '' : 'none';
+    configSelect.disabled = !needsConfig;
+
+    // k field is only shown for kfold & benchmark.
+    const needsK = (mode === 'kfold' || mode === 'benchmark');
+    kField.style.display = needsK ? '' : 'none';
+}
+document.querySelectorAll('input[name="runMode"]').forEach(r => r.addEventListener('change', applyMode));
+applyMode();
+
+// ── Job polling — drives the live banner for ALL async modes (single,
+// compare, kfold, benchmark are all async after the cancel/progress refactor).
+let currentPollHandle = null;
+let currentJobId      = null;     // shared with the cancel button
+const banner         = document.getElementById('jobStatusBanner');
+const bannerSpinner  = document.getElementById('jobStatusSpinner');
+const bannerText     = document.getElementById('jobStatusText');
+const bannerProgress = document.getElementById('jobProgressText');
+const bannerBar      = document.getElementById('jobProgressBar');
+const bannerCount    = document.getElementById('jobProgressCount');
+const bannerEta      = document.getElementById('jobProgressEta');
+const cancelBtn      = document.getElementById('jobCancelBtn');
+
+// Cancel button — fires POST /cancel/{jobId}; the running job exits at the
+// next phase boundary and the polling loop's onComplete picks up the CANCELLED
+// state and resets the banner.
+if (cancelBtn) {
+    cancelBtn.addEventListener('click', async () => {
+        if (!currentJobId) return;
+        if (!confirm('Stop the running evaluation?\n\n' +
+                'Partial results already persisted will remain. The job exits at the next phase boundary (typically a few seconds; longer if a single detection / explanation step is mid-flight).')) return;
+        cancelBtn.disabled = true;
+        cancelBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Cancelling…';
+        try {
+            await fetch('/api/v1/evaluation/cancel/' + currentJobId, { method: 'POST' });
+        } catch (err) {
+            console.warn('cancel call failed', err);
+            cancelBtn.disabled = false;
+            cancelBtn.innerHTML = '<i class="bi bi-stop-fill me-1"></i>Cancel';
+        }
+    });
+}
+
+/**
+ * Human-readable duration formatter — "47s" / "2m 15s" / "1h 04m".
+ * Keeps the ETA glanceable without a second-counter that distracts.
+ */
+function humanDuration(ms) {
+    if (ms == null || !isFinite(ms) || ms < 0) return '—';
+    const s = Math.round(ms / 1000);
+    if (s < 60)   return s + 's';
+    const m = Math.floor(s / 60);
+    const rs = s % 60;
+    if (m < 60)   return m + 'm ' + String(rs).padStart(2, '0') + 's';
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    return h + 'h ' + String(rm).padStart(2, '0') + 'm';
+}
+
+// ── localStorage persistence for the active evaluation job ──────────────
+// When the user navigates away and comes back (or hard-reloads), we want
+// the progress banner to reappear automatically. The jobId is the single
+// piece of state we need; the server keeps progress in PipelineStatusTracker
+// (Caffeine, 24 h TTL), so we just re-attach the poll loop.
+//
+// Multiple tabs polling the same job is safe — the server is the
+// authoritative progress store; each tab shows its own copy of the banner.
+const ACTIVE_JOB_STORAGE_KEY = 'fg-active-eval-job';
+
+function persistActiveJob(jobId, label) {
+    try {
+        localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
+            jobId: jobId,
+            label: label,
+            savedAt: Date.now()
+        }));
+    } catch (_) { /* localStorage disabled → banner simply won't persist */ }
+}
+
+function clearActiveJob() {
+    try { localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY); } catch (_) {}
+}
+
+function readActiveJob() {
+    try {
+        const raw = localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (_) { return null; }
+}
+
+function startPolling(jobId, label) {
+    banner.classList.add('active');
+    bannerText.textContent = label + ' running...';
+    bannerProgress.textContent = '';
+    bannerBar.style.width = '0%';
+    bannerCount.textContent = '';
+    bannerEta.textContent = '';
+    // Re-enable the cancel button — previous run may have left it disabled.
+    currentJobId = jobId;
+    if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.innerHTML = '<i class="bi bi-stop-fill me-1"></i>Cancel';
+    }
+    // Persist so the banner restores itself on page reload / navigation return.
+    persistActiveJob(jobId, label);
+    if (currentPollHandle) currentPollHandle.stop();
+
+    // Track a local "observed start" so we can compute throughput against the
+    // tracker's startedAt if available, falling back to wall-clock.
+    const localStart = Date.now();
+
+    currentPollHandle = FG.pollJob({
+        url: '/api/v1/evaluation/status/' + jobId,
+        intervalMs: 2000,
+        terminalStates: ['COMPLETED', 'FAILED', 'CANCELLED'],
+        statePath: 'phase',
+        onTick: (s) => {
+            const step = s.currentStep || s.phase || 'running';
+            bannerText.textContent = label + ' · ' + step;
+
+            // Percent + bar
+            const pct = Math.max(0, Math.min(100, s.progressPercent || 0));
+            bannerProgress.textContent = pct + '%';
+            bannerBar.style.width = pct + '%';
+
+            // "X of Y" count — new in this release. total=0 means the job
+            // hasn't committed a denominator yet (early phases).
+            if (s.total && s.total > 0) {
+                bannerCount.textContent = 'Processed ' + Number(s.processed || 0).toLocaleString()
+                    + ' / ' + Number(s.total).toLocaleString()
+                    + ' · ' + Number(s.alertsCreated || 0).toLocaleString() + ' alerts';
+            } else if (s.processed) {
+                bannerCount.textContent = 'Processed ' + Number(s.processed).toLocaleString()
+                    + ' · ' + Number(s.alertsCreated || 0).toLocaleString() + ' alerts';
+            } else {
+                bannerCount.textContent = '';
+            }
+
+            // Throughput + ETA. Prefer startedAt from the server; fall back to
+            // localStart so the first tick still renders something usable.
+            const startedAt = s.startedAt ? Date.parse(s.startedAt) : localStart;
+            const elapsedMs = Math.max(1, Date.now() - startedAt);
+            const done = s.processed || 0;
+            const rate = done / (elapsedMs / 1000);
+            if (rate > 0 && s.total && s.total > done) {
+                const remaining = s.total - done;
+                const etaMs = (remaining / rate) * 1000;
+                bannerEta.textContent = rate.toFixed(1) + ' / s · ETA ' + humanDuration(etaMs);
+            } else if (rate > 0) {
+                bannerEta.textContent = rate.toFixed(1) + ' / s';
+            } else {
+                bannerEta.textContent = '';
+            }
+        },
+        onComplete: (s) => {
+            banner.classList.remove('active');
+            currentJobId = null;
+            clearActiveJob();  // terminal state reached → forget it
+            if (s.phase === 'COMPLETED') {
+                location.reload();
+            } else if (s.phase === 'CANCELLED') {
+                // Don't alert — user explicitly asked for it. Reload so any
+                // partial results that were already persisted show up in the
+                // table.
+                location.reload();
+            } else {
+                alert('Job failed: ' + (s.error || 'unknown error'));
+            }
+        },
+        // Network errors aren't fatal — leave the banner up; the next manual
+        // interaction (or reload) will reset state. Matches prior silent-catch behaviour.
+        onError: () => {}
+    });
+}
+
+// ── Unified runner ───────────────────────────────────────────────────
+runBtn.addEventListener('click', async () => {
+    const mode = document.querySelector('input[name="runMode"]:checked').value;
+    const resultDiv = document.getElementById('expResult');
+    resultDiv.style.display = 'none';
+    runBtn.disabled = true;
+
+    const name = document.getElementById('expName').value || (mode + '-' + Date.now());
+    const dataset = document.getElementById('expDataset').value;
+    const scoreExplanations = document.getElementById('scoreExplanations').checked;
+    const config = configSelect.value;
+    const k = document.getElementById('kValue').value;
+    const maxExpl = document.getElementById('maxExpl').value;
+    const maxAlerts = document.getElementById('maxAlerts').value;
+
+    let url, opts;
+    const p = new URLSearchParams();
+    p.set('experimentName', name);
+    p.set('dataset', dataset);
+    p.set('scoreExplanations', scoreExplanations);
+    p.set('maxAlertsToExplain', maxAlerts);
+
+    if (mode === 'single') {
+        p.set('config', config);
+        p.set('maxExplanationsToScore', maxExpl);
+        url = '/api/v1/evaluation/run?' + p;
+    } else if (mode === 'compare') {
+        url = '/api/v1/evaluation/compare?' + p;
+    } else if (mode === 'kfold') {
+        p.set('config', config);
+        p.set('k', k);
+        url = '/api/v1/evaluation/kfold?' + p;
+    } else { // benchmark
+        p.set('k', k);
+        url = '/api/v1/evaluation/benchmark?' + p;
+    }
+
+    try {
+        const res = await fetch(url, { method: 'POST' });
+        const data = await res.json();
+        resultDiv.style.display = 'block';
+        if (res.status === 202) {
+            // All four modes are async — they all return 202 Accepted with a jobId.
+            resultDiv.innerHTML = '<div class="alert alert-info mb-0 p-2 small">' +
+                '<i class="bi bi-hourglass-split me-1"></i>Job started (ID: <code>' +
+                data.jobId + '</code>). Results will reload when complete. ' +
+                'Click <strong>Cancel</strong> in the banner above to stop early.</div>';
+            startPolling(data.jobId, runLabels[mode]);
+        } else if (res.ok) {
+            // Defensive: any older sync endpoint variant — still handle a result body.
+            const rowsAdded = Array.isArray(data) ? data.length : 0;
+            resultDiv.innerHTML = '<div class="alert alert-success mb-0 p-2 small">' +
+                '<i class="bi bi-check-circle me-1"></i>Completed — ' +
+                rowsAdded + ' result row(s) persisted. Reloading…</div>';
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-danger mb-0 p-2 small">' +
+                '<i class="bi bi-x-circle me-1"></i>' +
+                (data.detail || data.message || JSON.stringify(data)) + '</div>';
+        }
+    } catch (err) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="alert alert-danger mb-0 p-2 small">' +
+            '<i class="bi bi-x-circle me-1"></i>' + err.message + '</div>';
+    }
+    runBtn.disabled = false;
+});
+
+// ── CAKR radar ──────────────────────────────────────────────────────
+async function loadCakrRadar() {
+    try {
+        const res = await fetch('/api/v1/evaluation/cakr-breakdown');
+        if (!res.ok) throw new Error('bad status ' + res.status);
+        const rows = await res.json();
+        renderCakrRadar(rows);
+    } catch (err) {
+        console.warn('CAKR fetch failed:', err);
+        document.getElementById('noCakrData').style.display = 'flex';
+        document.getElementById('cakrRadarChart').style.display = 'none';
+    }
+}
+
+// num() comes from FG.num (shared in /js/finguard.js)
+const num = FG.num;
+
+function renderCakrRadar(rows) {
+    if (!rows || rows.length === 0) {
+        document.getElementById('noCakrData').style.display = 'flex';
+        document.getElementById('cakrRadarChart').style.display = 'none';
+        return;
+    }
+    document.getElementById('noCakrData').style.display = 'none';
+    document.getElementById('cakrRadarChart').style.display = 'block';
+
+    const dims = ['Completeness', 'Actionability', 'Correctness', 'Regulatory'];
+    const keys = ['completeness', 'actionability', 'correctness', 'regulatory'];
+    const datasets = rows.map((r, i) => ({
+        label: r.config,
+        data: keys.map(k => num(r[k]) ?? 0),
+        backgroundColor: COLORS[i % COLORS.length] + '30',
+        borderColor: COLORS[i % COLORS.length],
+        pointBackgroundColor: COLORS[i % COLORS.length],
+        borderWidth: 2
+    }));
+
+    new Chart(document.getElementById('cakrRadarChart'), {
+        type: 'radar',
+        data: { labels: dims, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label} — ${ctx.label}: ${ctx.raw.toFixed(2)}` } }
+            },
+            scales: {
+                r: {
+                    min: 0, max: 5,
+                    ticks: { stepSize: 1, color: '#8b8fa3', font: { size: 10 }, backdropColor: 'transparent' },
+                    angleLines: { color: '#2d3140' },
+                    grid: { color: '#2d3140' },
+                    pointLabels: { color: '#c4c8d8', font: { size: 11 } }
+                }
+            }
+        }
+    });
+}
+
+// ── Cost breakdown ──────────────────────────────────────────────────
+async function loadCostBreakdown() {
+    try {
+        const res = await fetch('/api/v1/evaluation/cost-breakdown');
+        if (!res.ok) throw new Error('bad status ' + res.status);
+        const rows = await res.json();
+        renderCostBreakdown(rows);
+    } catch (err) {
+        console.warn('Cost fetch failed:', err);
+        document.getElementById('noCostData').style.display = 'flex';
+        document.getElementById('costTableWrap').style.display = 'none';
+    }
+}
+
+function renderCostBreakdown(rows) {
+    const body = document.getElementById('costTableBody');
+    if (!rows || rows.length === 0) {
+        document.getElementById('noCostData').style.display = 'flex';
+        document.getElementById('costTableWrap').style.display = 'none';
+        return;
+    }
+    document.getElementById('noCostData').style.display = 'none';
+    document.getElementById('costTableWrap').style.display = 'block';
+    body.innerHTML = rows.map(r => `
+        <tr>
+            <td><span class="badge bg-secondary">${escapeHtml(r.config)}</span></td>
+            <td class="text-end">${Number(r.count).toLocaleString()}</td>
+            <td class="text-end">${Number(r.totalTokens).toLocaleString()}</td>
+            <td class="text-end">${r.avgPromptTokens}</td>
+            <td class="text-end">${r.avgCompletionTokens}</td>
+            <td class="text-end">${r.avgLatencyMs === 'N/A' ? '—' : Math.round(Number(r.avgLatencyMs)).toLocaleString() + 'ms'}</td>
+            <td class="text-end">${r.p95LatencyMs === 'N/A' ? '—' : Number(r.p95LatencyMs).toLocaleString() + 'ms'}</td>
+        </tr>`).join('');
+}
+
+// ── Hallucination breakdown (matrix) ────────────────────────────────
+async function loadHallucinationBreakdown() {
+    try {
+        const res = await fetch('/api/v1/evaluation/hallucination-breakdown');
+        if (!res.ok) throw new Error('bad status ' + res.status);
+        const data = await res.json();
+        renderHallucinationBreakdown(data);
+    } catch (err) {
+        console.warn('Hallucination fetch failed:', err);
+        document.getElementById('noHallucData').style.display = 'flex';
+        document.getElementById('hallucTableWrap').style.display = 'none';
+    }
+}
+
+function renderHallucinationBreakdown(byConfig) {
+    const configs = Object.keys(byConfig);
+    if (configs.length === 0) {
+        document.getElementById('noHallucData').style.display = 'flex';
+        document.getElementById('hallucTableWrap').style.display = 'none';
+        return;
+    }
+    document.getElementById('noHallucData').style.display = 'none';
+    document.getElementById('hallucTableWrap').style.display = 'block';
+
+    // Union of all flag types across configs.
+    const flagTypes = Array.from(
+        new Set(configs.flatMap(c => Object.keys(byConfig[c])))
+    ).sort();
+
+    // Replace single placeholder TH with one per flag type.
+    const headerTh = document.getElementById('hallucFlagHeaders');
+    if (headerTh) {
+        const parentTr = headerTh.parentElement;
+        headerTh.remove();
+        flagTypes.forEach(flag => {
+            const th = document.createElement('th');
+            th.className = 'text-end';
+            th.textContent = flag;
+            parentTr.appendChild(th);
+        });
+    }
+
+    const body = document.getElementById('hallucTableBody');
+    body.innerHTML = configs.map(cfg => {
+        const row = byConfig[cfg] || {};
+        const cells = flagTypes.map(f => {
+            const n = row[f] || 0;
+            const cls = n === 0 ? 'text-muted' : (n > 5 ? 'metric-bad' : 'metric-medium');
+            return `<td class="text-end ${cls}">${n}</td>`;
+        }).join('');
+        return `<tr><td><span class="badge bg-secondary">${escapeHtml(cfg)}</span></td>${cells}</tr>`;
+    }).join('');
+}
+
+// escapeHtml comes from FG.escapeHtml (shared in /js/finguard.js)
+const escapeHtml = FG.escapeHtml;
+
+loadCakrRadar();
+loadCostBreakdown();
+loadHallucinationBreakdown();
+
+// ── Quality-vs-Cost Pareto scatter ─────────────────────────────────
+// Overlays /cakr-breakdown + /cost-breakdown so each config becomes one
+// point (x = cost metric, y = overall CAKR). Re-renders on axis toggle.
+let paretoChart = null;
+let paretoCakr = null;
+let paretoCost = null;
+
+async function loadPareto() {
+    try {
+        const [cakr, cost] = await Promise.all([
+            FG.fetchJson('/api/v1/evaluation/cakr-breakdown'),
+            FG.fetchJson('/api/v1/evaluation/cost-breakdown')
+        ]);
+        paretoCakr = cakr;
+        paretoCost = cost;
+        renderPareto();
+    } catch (err) {
+        document.getElementById('noParetoData').style.display = 'flex';
+        document.getElementById('paretoChart').style.display = 'none';
+    }
+}
+
+function renderPareto() {
+    if (!paretoCakr || !paretoCost) return;
+    const axis = document.querySelector('input[name="costAxis"]:checked').value;
+    // Build a { config: { cakr, x } } lookup — keep only configs that appear
+    // in both breakdowns (i.e., configs that actually produced LLM output).
+    const merged = {};
+    paretoCakr.forEach(c => {
+        const overall = FG.num(c.overall);
+        if (overall != null) merged[c.config] = { cakr: overall };
+    });
+    paretoCost.forEach(c => {
+        if (!merged[c.config]) return;
+        // avgPromptTokens/avgCompletionTokens arrive as either numbers or the
+        // string 'N/A' when no LLM calls were logged for that config.
+        const latency = FG.num(c.avgLatencyMs);
+        const promptT = FG.num(c.avgPromptTokens);
+        const complT = FG.num(c.avgCompletionTokens);
+        merged[c.config].latency  = latency;
+        merged[c.config].tokens   = (promptT != null && complT != null) ? (promptT + complT) : null;
+    });
+
+    const points = Object.entries(merged)
+        .map(([cfg, v]) => ({ cfg, x: v[axis], y: v.cakr }))
+        .filter(p => p.x != null && p.y != null);
+
+    if (points.length === 0) {
+        document.getElementById('noParetoData').style.display = 'flex';
+        document.getElementById('paretoChart').style.display = 'none';
+        return;
+    }
+    document.getElementById('noParetoData').style.display = 'none';
+    document.getElementById('paretoChart').style.display = 'block';
+
+    // Pareto frontier: config A dominates B if A has lower X and higher Y.
+    // A point is on the frontier if no other point strictly dominates it.
+    const frontier = points.filter(p =>
+        !points.some(q => q !== p && q.x <= p.x && q.y >= p.y && (q.x < p.x || q.y > p.y))
+    );
+    const frontierConfigs = new Set(frontier.map(p => p.cfg));
+
+    // One dataset per config so the legend lets users toggle visibility.
+    const datasets = points.map((p, i) => ({
+        label: p.cfg,
+        data: [{ x: p.x, y: p.y }],
+        backgroundColor: FG.COLORS[i % FG.COLORS.length],
+        borderColor: frontierConfigs.has(p.cfg) ? '#22c55e' : FG.COLORS[i % FG.COLORS.length],
+        borderWidth: frontierConfigs.has(p.cfg) ? 3 : 1,
+        pointRadius: frontierConfigs.has(p.cfg) ? 9 : 7,
+        pointHoverRadius: 11
+    }));
+
+    const xLabel = axis === 'latency' ? 'Avg latency (ms, lower is better)' : 'Avg tokens per call (lower is better)';
+
+    if (paretoChart) paretoChart.destroy();
+    paretoChart = new Chart(document.getElementById('paretoChart'), {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: function (ctx) {
+                            const onFrontier = frontierConfigs.has(ctx.dataset.label) ? ' · Pareto optimal' : '';
+                            return ' ' + ctx.dataset.label +
+                                   ' · ' + (axis === 'latency' ? Math.round(ctx.parsed.x) + 'ms'
+                                                                : Math.round(ctx.parsed.x) + ' tok') +
+                                   ' · CAKR ' + ctx.parsed.y.toFixed(2) + onFrontier;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: xLabel, color: '#8b8fa3' },
+                    ticks: { color: '#8b8fa3' },
+                    grid: { color: '#2d3140' }
+                },
+                y: {
+                    min: 1, max: 5,
+                    title: { display: true, text: 'Overall CAKR score (higher is better)', color: '#8b8fa3' },
+                    ticks: { stepSize: 1, color: '#8b8fa3' },
+                    grid: { color: '#2d3140' }
+                }
+            }
+        }
+    });
+}
+
+document.querySelectorAll('input[name="costAxis"]').forEach(r =>
+    r.addEventListener('change', renderPareto));
+loadPareto();
+
+// ── Per-row delete ──────────────────────────────────────────────────
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.delete-row-btn');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (!confirm('Delete experiment result #' + id + '?')) return;
+    btn.disabled = true;
+    try {
+        const res = await fetch('/api/v1/evaluation/results/' + id, { method: 'DELETE' });
+        if (res.ok || res.status === 204) {
+            const row = document.getElementById('row-' + id);
+            if (row) row.remove();
+        } else {
+            alert('Delete failed');
+            btn.disabled = false;
+        }
+    } catch (err) {
+        alert('Delete failed: ' + err.message);
+        btn.disabled = false;
+    }
+});
+
+// ── Interpret result with LLM ───────────────────────────────────────
+const interpretModal = new bootstrap.Modal(document.getElementById('interpretModal'));
+const interpretLoading = document.getElementById('interpretLoading');
+const interpretContent = document.getElementById('interpretContent');
+const interpretError = document.getElementById('interpretError');
+const interpretText = document.getElementById('interpretText');
+const interpretErrorText = document.getElementById('interpretErrorText');
+const interpretContext = document.getElementById('interpretContext');
+
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.interpret-btn');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const name = btn.dataset.name;
+    const config = btn.dataset.config;
+
+    interpretContext.textContent = 'Experiment: ' + name + '  \u00b7  Config: ' + config;
+    interpretLoading.classList.remove('d-none');
+    interpretContent.classList.add('d-none');
+    interpretError.classList.add('d-none');
+    interpretModal.show();
+
+    try {
+        const res = await fetch('/api/v1/evaluation/results/' + id + '/interpret', { method: 'POST' });
+        const data = await res.json();
+        interpretLoading.classList.add('d-none');
+        if (res.ok && data.interpretation) {
+            interpretText.textContent = data.interpretation;
+            interpretContent.classList.remove('d-none');
+        } else {
+            interpretErrorText.textContent = data.interpretation || JSON.stringify(data);
+            interpretError.classList.remove('d-none');
+        }
+    } catch (err) {
+        interpretLoading.classList.add('d-none');
+        interpretErrorText.textContent = 'Request failed: ' + err.message;
+        interpretError.classList.remove('d-none');
+    }
+});
+
+// ── Delete all ──────────────────────────────────────────────────────
+const deleteAllBtn = document.getElementById('deleteAllBtn');
+if (deleteAllBtn) {
+    deleteAllBtn.addEventListener('click', async () => {
+        if (!confirm('Delete ALL experiment results? This cannot be undone.')) return;
+        deleteAllBtn.disabled = true;
+        try {
+            const res = await fetch('/api/v1/evaluation/results', { method: 'DELETE' });
+            if (res.ok) location.reload();
+            else { alert('Delete all failed'); deleteAllBtn.disabled = false; }
+        } catch (err) {
+            alert('Delete all failed: ' + err.message);
+            deleteAllBtn.disabled = false;
+        }
+    });
+}
+
+// ── Bulk delete: select-row checkboxes + header "Delete selected" button ────
+(function () {
+    const selectAll       = document.getElementById('selectAllRows');
+    const rowCheckboxes   = document.querySelectorAll('.row-checkbox');
+    const deleteSelected  = document.getElementById('deleteSelectedBtn');
+    const selectedCount   = document.getElementById('deleteSelectedCount');
+    const deleteAllRows   = document.getElementById('deleteAllResultsBtn');
+    const deleteExpMenu   = document.getElementById('deleteExperimentMenu');
+    if (!selectAll || !deleteSelected) return;
+
+    function syncSelectedCount() {
+        const ticked = Array.from(rowCheckboxes).filter(c => c.checked);
+        selectedCount.textContent = ticked.length;
+        deleteSelected.style.display = ticked.length > 0 ? '' : 'none';
+    }
+
+    selectAll.addEventListener('change', () => {
+        rowCheckboxes.forEach(c => c.checked = selectAll.checked);
+        syncSelectedCount();
+    });
+    rowCheckboxes.forEach(c => c.addEventListener('change', syncSelectedCount));
+
+    deleteSelected.addEventListener('click', async () => {
+        const ids = Array.from(rowCheckboxes).filter(c => c.checked).map(c => c.value);
+        if (ids.length === 0) return;
+        if (!confirm('Delete ' + ids.length + ' selected experiment result row(s)? This cannot be undone.')) return;
+        deleteSelected.disabled = true;
+        try {
+            const res = await fetch('/api/v1/evaluation/results/bulk?ids=' + ids.join(','),
+                                     { method: 'DELETE' });
+            if (res.ok) location.reload();
+            else { alert('Delete selected failed (' + res.status + ')'); deleteSelected.disabled = false; }
+        } catch (err) {
+            alert('Delete selected failed: ' + err.message);
+            deleteSelected.disabled = false;
+        }
+    });
+
+    if (deleteAllRows) {
+        deleteAllRows.addEventListener('click', async () => {
+            if (!confirm('Delete EVERY experiment result in the database? This cannot be undone.')) return;
+            deleteAllRows.disabled = true;
+            try {
+                const res = await fetch('/api/v1/evaluation/results', { method: 'DELETE' });
+                if (res.ok) location.reload();
+                else { alert('Delete all failed'); deleteAllRows.disabled = false; }
+            } catch (err) {
+                alert('Delete all failed: ' + err.message);
+                deleteAllRows.disabled = false;
+            }
+        });
+    }
+
+    // Populate the "Delete experiment" dropdown on demand — avoids a query if
+    // the user never opens it.
+    let expNamesLoaded = false;
+    async function loadExperimentNames() {
+        if (expNamesLoaded) return;
+        try {
+            const res = await fetch('/api/v1/evaluation/experiments');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const names = await res.json();
+            if (names.length === 0) {
+                deleteExpMenu.innerHTML = '<li><span class="dropdown-item-text text-muted small">No experiments yet</span></li>';
+            } else {
+                deleteExpMenu.innerHTML = names.map(n =>
+                    `<li><a class="dropdown-item delete-exp-item" href="#" data-name="${FG.escapeHtml(n)}">` +
+                    `<i class="bi bi-trash3 me-1 text-danger"></i>${FG.escapeHtml(n)}</a></li>`
+                ).join('');
+                deleteExpMenu.querySelectorAll('.delete-exp-item').forEach(item =>
+                    item.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        const name = item.dataset.name;
+                        if (!confirm('Delete every row (all folds + summary) for experiment "' + name + '"?\nThis cannot be undone.')) return;
+                        try {
+                            const r = await fetch('/api/v1/evaluation/results/by-name/' + encodeURIComponent(name),
+                                                   { method: 'DELETE' });
+                            if (r.ok) location.reload();
+                            else alert('Delete failed (' + r.status + ')');
+                        } catch (err) { alert('Delete failed: ' + err.message); }
+                    }));
+            }
+            expNamesLoaded = true;
+        } catch (err) {
+            deleteExpMenu.innerHTML = '<li><span class="dropdown-item-text text-danger small">Load failed: ' + FG.escapeHtml(err.message) + '</span></li>';
+        }
+    }
+    // Load when the dropdown's toggle is clicked (Bootstrap fires `show.bs.dropdown`).
+    const dropdownToggle = deleteExpMenu.previousElementSibling;
+    if (dropdownToggle) {
+        dropdownToggle.addEventListener('click', loadExperimentNames);
+    }
+
+    syncSelectedCount();
+})();
+
+// Tooltips auto-init via finguard.js. Re-run here in case dynamic
+// panels above injected any new triggers before this script ran.
+FG.initTooltips();
+
+// ── Restore the progress banner if a job was running when we left the page ──
+// This handles "user ran a benchmark, navigated to Dashboard, came back" —
+// the server still has the job tracked; we just re-attach the poll loop.
+(async function resumeActiveJobIfAny() {
+    const saved = readActiveJob();
+    if (!saved || !saved.jobId) return;
+
+    try {
+        // Ask the server whether this job is still running. The status tracker
+        // keeps jobs for 24 h; a 404 here means the job expired or was never real.
+        const res = await fetch('/api/v1/evaluation/status/' + encodeURIComponent(saved.jobId));
+        if (res.status === 404) {
+            clearActiveJob();  // job is gone — wipe stale local state
+            return;
+        }
+        if (!res.ok) return;  // transient error; try again next page load
+
+        const status = await res.json();
+        const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'];
+        if (terminal.includes(status.phase)) {
+            // Job already finished while we were elsewhere. Drop the local
+            // record; don't re-open the banner (the completed results are
+            // already in the table below via the server-side render).
+            clearActiveJob();
+            return;
+        }
+
+        // Still running — reattach the banner + poll loop seamlessly.
+        const label = saved.label || 'Experiment';
+        startPolling(saved.jobId, label);
+    } catch (_) {
+        // Network hiccup; don't block page render. Banner will appear on the
+        // next successful poll if the user reloads.
+    }
+})();
+</script>
+</body>
+</html>

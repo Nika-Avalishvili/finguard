@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Explanations')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1><i class="bi bi-chat-left-text me-2"></i>Explanations</h1>
+            <p>LLM-generated alert explanations with hallucination &amp; CAKR quality metrics.</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary fs-6"
+                  th:text="${#numbers.formatInteger(page.totalElements, 1, 'COMMA') + ' matching'}">0 matching</span>
+            <button class="btn btn-sm btn-outline-primary" th:if="${total > 0}"
+                    id="rescoreBtn"
+                    data-bs-toggle="tooltip"
+                    title="Re-run CAKR scoring on a sample of explanations using the currently active LLM as judge. Useful for comparing judge models — switch the active LLM in Settings, then click here.">
+                <i class="bi bi-arrow-repeat me-1"></i>Re-score
+            </button>
+            <button class="btn btn-sm btn-outline-danger" th:if="${total > 0}"
+                    onclick="clearData('explanations', 'all explanations', '/explanations')">
+                <i class="bi bi-trash3 me-1"></i>Clear all
+            </button>
+        </div>
+    </div>
+
+    <!-- Re-score result panel (populated client-side) -->
+    <div id="rescoreResult" class="mb-3" style="display:none"></div>
+
+    <!-- ========== Stat strip ========== -->
+    <div class="row g-3 mb-3">
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--primary">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(total, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    Total explanations
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Every LLM-generated explanation across all detection configs (Direct / RAG / Validated)."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--success">
+                <div class="metric-tile__value"
+                     th:text="${avgConfidence != null ? #numbers.formatDecimal(avgConfidence, 1, 2) : 'N/A'}">N/A</div>
+                <div class="metric-tile__label">
+                    Avg confidence
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Mean of the confidence score (0–1) the LLM reports for its own explanations. Self-reported — not independent validation."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--info">
+                <div class="metric-tile__value"
+                     th:text="${avgLatencyMs != null ? #numbers.formatDecimal(avgLatencyMs / 1000.0, 1, 1) + 's' : 'N/A'}">N/A</div>
+                <div class="metric-tile__label">
+                    Avg latency
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Mean wall-clock time per explanation — includes LLM call + retrieval."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile"
+                 th:classappend="${flagged == 0} ? 'metric-tile--success' : 'metric-tile--warning'">
+                <div class="metric-tile__value">
+                    <span th:text="${flagged}">0</span>
+                    <span class="text-muted" style="font-size:0.75rem;font-weight:400"
+                          th:text="'of ' + ${clean + flagged}"> of 0</span>
+                </div>
+                <div class="metric-tile__label">
+                    Hallucinations flagged
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Count of explanations where the HallucinationValidator flagged at least one factual error (wrong amount, invented account, risk overclaim, etc.)."></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Filters ========== -->
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <form class="row g-2 align-items-end" th:action="@{/explanations}" method="get">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold mb-1" for="filterType">
+                        Explanation Type
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="TEMPLATE = rule-based static text; LLM_DIRECT = LLM without retrieval; LLM_RAG = LLM + fraud-pattern retrieval; LLM_RAG_VALIDATED = LLM_RAG that passed hallucination validation."></i>
+                    </label>
+                    <select class="form-select form-select-sm" name="type" id="filterType">
+                        <option value="">All types</option>
+                        <option th:each="t : ${types}" th:value="${t}" th:text="${t.displayName}"
+                                th:selected="${t.name() == selectedType}">TYPE</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold mb-1" for="filterFlag">
+                        Hallucination State
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Clean = no factual errors found. Flagged = validator caught an issue. Unscored = not yet validated."></i>
+                    </label>
+                    <select class="form-select form-select-sm" name="flag" id="filterFlag">
+                        <option value="all"      th:selected="${selectedFlag == 'all'}">All states</option>
+                        <option value="clean"    th:selected="${selectedFlag == 'clean'}">Clean only</option>
+                        <option value="flagged"  th:selected="${selectedFlag == 'flagged'}">Flagged only</option>
+                        <option value="unscored" th:selected="${selectedFlag == 'unscored'}">Unscored only</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-funnel me-1"></i>Apply
+                    </button>
+                    <a th:href="@{/explanations}" class="btn btn-outline-secondary btn-sm"
+                       th:if="${selectedType != null || (selectedFlag != null && selectedFlag != 'all')}">
+                        <i class="bi bi-x-circle me-1"></i>Clear
+                    </a>
+                </div>
+            </form>
+
+            <div class="mt-2 d-flex gap-2 flex-wrap"
+                 th:if="${selectedType != null || (selectedFlag != null && selectedFlag != 'all')}">
+                <span class="text-muted small">Active:</span>
+                <span th:if="${selectedType != null}" class="badge bg-dark border border-secondary">
+                    type = <strong th:text="${selectedType}">LLM_RAG</strong>
+                </span>
+                <span th:if="${selectedFlag != null && selectedFlag != 'all'}"
+                      class="badge bg-dark border border-secondary">
+                    state = <strong th:text="${selectedFlag}">flagged</strong>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Table ========== -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Alert</th>
+                        <th>
+                            Type
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="TEMPLATE / LLM_DIRECT / LLM_RAG / LLM_RAG_VALIDATED. Validated = LLM_RAG that passed the HallucinationValidator."></i>
+                        </th>
+                        <th>Risk Summary</th>
+                        <th>
+                            Confidence
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="LLM's self-reported certainty (0–1). Colour: green ≥ 0.8, amber 0.6–0.8, red below."></i>
+                        </th>
+                        <th>Latency</th>
+                        <th>
+                            Hallucination
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Clean = validator found no factual errors. Flagged = at least one issue detected."></i>
+                        </th>
+                        <th>
+                            CAKR Avg
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Mean across the four CAKR dimensions (1–5). Colour: green ≥ 4, amber ≥ 2.5, red below."></i>
+                        </th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="expl : ${page.content}">
+                        <td th:text="${expl.id}">1</td>
+                        <td>
+                            <a th:href="@{/alerts/{id}(id=${expl.alert.id})}" class="text-decoration-none"
+                               th:text="'Alert #' + ${expl.alert.id}">Alert #1</a>
+                        </td>
+                        <td><span class="badge bg-secondary" th:text="${expl.explanationType.displayName}">TYPE</span></td>
+                        <td th:text="${expl.riskSummary != null ? #strings.abbreviate(expl.riskSummary, 50) : '—'}"
+                            th:title="${expl.riskSummary}">—</td>
+                        <td>
+                            <span th:if="${expl.confidenceScore != null}"
+                                  th:text="${#numbers.formatDecimal(expl.confidenceScore, 1, 2)}"
+                                  th:style="${expl.confidenceScore >= 0.8} ? 'color:var(--fg-success);font-weight:600' :
+                                             (${expl.confidenceScore >= 0.6} ? 'color:var(--fg-warning);font-weight:600' : 'color:var(--fg-danger);font-weight:600')">0.00</span>
+                            <span th:unless="${expl.confidenceScore != null}" class="text-muted">—</span>
+                        </td>
+                        <td class="text-muted small"
+                            th:text="${expl.latencyMs != null ? expl.latencyMs + 'ms' : '—'}">—</td>
+                        <td>
+                            <span th:if="${expl.hallucinationFree != null && expl.hallucinationFree}"
+                                  class="badge badge-status badge-false-pos">
+                                <i class="bi bi-check-circle me-1"></i>Clean
+                            </span>
+                            <span th:if="${expl.hallucinationFree != null && !expl.hallucinationFree}"
+                                  class="badge badge-status badge-confirmed">
+                                <i class="bi bi-exclamation-triangle me-1"></i>Flagged
+                            </span>
+                            <span th:if="${expl.hallucinationFree == null}" class="text-muted"
+                                  title="Not yet validated">—</span>
+                        </td>
+                        <td>
+                            <span th:if="${expl.cakrAverage != null}"
+                                  th:text="${#numbers.formatDecimal(expl.cakrAverage, 1, 1)}"
+                                  th:style="${expl.cakrAverage >= 4.0} ? 'color:var(--fg-success);font-weight:600' :
+                                             (${expl.cakrAverage >= 2.5} ? 'color:var(--fg-warning);font-weight:600' : 'color:var(--fg-danger);font-weight:600')">0.0</span>
+                            <span th:unless="${expl.cakrAverage != null}" class="text-muted">—</span>
+                        </td>
+                        <td>
+                            <a th:href="@{/alerts/{id}(id=${expl.alert.id})}"
+                               class="btn btn-outline-secondary btn-sm" title="Open alert detail">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    <tr th:if="${page.content.isEmpty()}">
+                        <td colspan="9">
+                            <div class="empty-state">
+                                <div class="empty-state__icon"><i class="bi bi-chat-square-text"></i></div>
+                                <div class="empty-state__title"
+                                     th:text="${selectedType != null || (selectedFlag != null && selectedFlag != 'all')}
+                                         ? 'No explanations match your filters'
+                                         : 'No explanations yet'">No explanations yet</div>
+                                <div class="empty-state__hint"
+                                     th:text="${selectedType != null || (selectedFlag != null && selectedFlag != 'all')}
+                                         ? 'Try clearing the filters to see everything.'
+                                         : 'Run a detection with an LLM config (Direct / RAG / Full System) to generate explanations.'">
+                                    Generate them from the Alerts or Detection pages.
+                                </div>
+                                <a class="btn btn-sm btn-outline-primary empty-state__cta"
+                                   th:if="${selectedType != null || (selectedFlag != null && selectedFlag != 'all')}"
+                                   th:href="@{/explanations}">
+                                    <i class="bi bi-x-circle me-1"></i>Clear filters
+                                </a>
+                                <a class="btn btn-sm btn-outline-primary empty-state__cta"
+                                   th:unless="${selectedType != null || (selectedFlag != null && selectedFlag != 'all')}"
+                                   th:href="@{/detection}">
+                                    <i class="bi bi-play-fill me-1"></i>Go to Detection
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pagination — filter params preserved -->
+    <nav th:if="${page.totalPages > 1}" class="mt-3">
+        <ul class="pagination pagination-sm justify-content-center">
+            <li class="page-item" th:classappend="${page.isFirst()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="@{/explanations(page=${page.number - 1}, type=${selectedType}, flag=${selectedFlag})}">Prev</a>
+            </li>
+            <li class="page-item" th:each="i : ${#numbers.sequence(0, page.totalPages - 1)}"
+                th:if="${page.totalPages <= 10 || (i < 3 || i > page.totalPages - 4 || (i >= page.number - 1 && i <= page.number + 1))}"
+                th:classappend="${i == page.number} ? 'active'">
+                <a class="page-link"
+                   th:href="@{/explanations(page=${i}, type=${selectedType}, flag=${selectedFlag})}"
+                   th:text="${i + 1}">1</a>
+            </li>
+            <li class="page-item" th:classappend="${page.isLast()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="@{/explanations(page=${page.number + 1}, type=${selectedType}, flag=${selectedFlag})}">Next</a>
+            </li>
+        </ul>
+    </nav>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // Tooltips auto-init via /js/finguard.js (FG.initTooltips).
+
+    // ── Re-score with the current judge LLM ─────────────────────────────
+    // Calls the audit-B-8 rescore endpoint. Picks the most common type
+    // filter if one is active, else defaults to LLM_RAG_VALIDATED which is
+    // the type the FULL_SYSTEM config produces after hallucination validation.
+    const rescoreBtn = document.getElementById('rescoreBtn');
+    if (rescoreBtn) {
+        rescoreBtn.addEventListener('click', async function () {
+            const selectedType = /*[[${selectedType}]]*/ null;
+            const type = selectedType || 'LLM_RAG_VALIDATED';
+            if (!confirm('Re-score up to 20 ' + type + ' explanations with the currently active LLM?\n\n'
+                    + 'This clears any prior CAKR scores on those rows and re-runs the judge.')) return;
+
+            const resultDiv = document.getElementById('rescoreResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div class="result-panel result-panel--primary">'
+                + '<span class="spinner-border spinner-border-sm me-2"></span>'
+                + 'Re-scoring with the current judge LLM — may take a minute or two…</div>';
+            rescoreBtn.disabled = true;
+
+            try {
+                const data = await FG.fetchJson(
+                    '/api/v1/evaluation/rescore?explanationType=' + encodeURIComponent(type) + '&limit=20',
+                    { method: 'POST' });
+                resultDiv.innerHTML = '<div class="result-panel result-panel--success">'
+                    + '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+                    + '<strong>' + data.rescored + '</strong> of ' + data.sampled + ' sampled '
+                    + FG.escapeHtml(String(data.explanationType)) + ' explanations re-scored'
+                    + ' in ' + (data.elapsedMs / 1000).toFixed(1) + 's. '
+                    + '<a href="/explanations" class="ms-2">Reload to see updated CAKR values →</a>'
+                    + '</div>';
+            } catch (err) {
+                resultDiv.innerHTML = '<div class="result-panel result-panel--danger">'
+                    + '<i class="bi bi-x-circle-fill text-danger me-2"></i>'
+                    + FG.escapeHtml(err.message) + '</div>';
+            } finally {
+                rescoreBtn.disabled = false;
+            }
+        });
+    }
+
+    async function clearData(entity, label, redirectTo) {
+        if (!confirm('Delete ' + label + '?\n\nThis is irreversible.')) return;
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const res = await fetch('/api/v1/data/' + entity, { method: 'DELETE' });
+            if (res.ok) { window.location.href = redirectTo; }
+            else {
+                alert('Delete failed: ' + res.status);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Clear all';
+            }
+        } catch(e) { alert(e.message); btn.disabled = false; }
+    }
+</script>
+</body>
+</html>

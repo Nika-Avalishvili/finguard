@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!--
+  Pipeline Stage Timings panel.
+  Identical markup to the dashboard.html inline copy — kept as a fragment
+  so HTMX can refresh just this card every 30s without full page reload.
+  Update both copies together if the layout changes.
+-->
+<div th:fragment="panel"
+     class="card mb-4"
+     hx-get="/dashboard/timings-fragment"
+     hx-trigger="every 30s"
+     hx-swap="outerHTML">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="bi bi-stopwatch me-2"></i>Pipeline Stage Timings
+            <i class="bi bi-question-circle info-hint"
+               data-bs-toggle="tooltip"
+               title="Wall-clock time per pipeline stage since the last app start. Auto-refreshes every 30s."></i>
+        </h5>
+        <span class="badge bg-secondary"
+              th:text="'Eval total: ' + ${#numbers.formatInteger(timings.evaluationTotalMs() / 1000, 1, 'COMMA')} + 's'">Eval total: 0s</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <!-- ── Ingestion stages ─────────────────────── -->
+            <div class="col-lg-4">
+                <h6 class="text-muted mb-2">
+                    <i class="bi bi-upload me-1"></i>Ingestion
+                </h6>
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr><th>Stage</th><th class="text-end">Runs</th><th class="text-end">Total</th><th class="text-end">Avg</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="row : ${timings.ingestion()}">
+                            <td th:text="${row.stage()}">Importing</td>
+                            <td class="text-end" th:text="${row.count()}">0</td>
+                            <td class="text-end"
+                                th:text="${row.totalMs() == 0 ? '—' : (#numbers.formatInteger(row.totalMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            <td class="text-end"
+                                th:text="${row.avgMs() == 0 ? '—' : (#numbers.formatInteger(row.avgMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ── ML training stages ───────────────────── -->
+            <div class="col-lg-4">
+                <h6 class="text-muted mb-2">
+                    <i class="bi bi-cpu me-1"></i>ML Training
+                </h6>
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr><th>Model</th><th class="text-end">Runs</th><th class="text-end">Total</th><th class="text-end">Avg</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="row : ${timings.training()}">
+                            <td th:text="${row.stage()}">RF</td>
+                            <td class="text-end" th:text="${row.count()}">0</td>
+                            <td class="text-end"
+                                th:text="${row.totalMs() == 0 ? '—' : (#numbers.formatInteger(row.totalMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            <td class="text-end"
+                                th:text="${row.avgMs() == 0 ? '—' : (#numbers.formatInteger(row.avgMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ── Evaluation per config ────────────────── -->
+            <div class="col-lg-4">
+                <h6 class="text-muted mb-2">
+                    <i class="bi bi-graph-up me-1"></i>Evaluation
+                </h6>
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr><th>Config</th><th class="text-end">Detect</th><th class="text-end">LLM</th><th class="text-end">CAKR</th><th class="text-end">Total</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="row : ${timings.evaluation()}">
+                            <td><span class="badge bg-light text-dark" th:text="${row.config()}">RULES_ONLY</span></td>
+                            <td class="text-end"
+                                th:text="${row.detectionMs() == null ? '—' : (#numbers.formatInteger(row.detectionMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            <td class="text-end"
+                                th:text="${row.explanationMs() == null ? '—' : (#numbers.formatInteger(row.explanationMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            <td class="text-end"
+                                th:text="${row.cakrMs() == null ? '—' : (#numbers.formatInteger(row.cakrMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            <td class="text-end fw-bold"
+                                th:text="${row.totalMs() == null ? '—' : (#numbers.formatInteger(row.totalMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <p class="text-muted small mt-2 mb-0">
+            <i class="bi bi-info-circle me-1"></i>
+            "—" means the stage hasn't run yet in this JVM session.
+            Counters reset on app restart. Full histograms at
+            <a href="/actuator/prometheus" class="text-decoration-none" target="_blank">/actuator/prometheus</a>.
+        </p>
+    </div>
+</div>
+
+</body>
+</html>

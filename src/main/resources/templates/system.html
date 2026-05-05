@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — System')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="bi bi-hdd-network me-2"></i>System</h1>
+        <p>
+            System observability + defensive documentation.
+            Three tabs: live health checks, performance metrics, and the design-decisions answer sheet.
+        </p>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" id="systemTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" th:classappend="${initialTab == 'health'} ? 'active'"
+                    id="tab-health" data-bs-toggle="tab" data-bs-target="#pane-health"
+                    type="button" role="tab">
+                <i class="bi bi-clipboard-check me-1"></i>Health Check
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" th:classappend="${initialTab == 'perf'} ? 'active'"
+                    id="tab-perf" data-bs-toggle="tab" data-bs-target="#pane-perf"
+                    type="button" role="tab">
+                <i class="bi bi-speedometer me-1"></i>Performance
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" th:classappend="${initialTab == 'design'} ? 'active'"
+                    id="tab-design" data-bs-toggle="tab" data-bs-target="#pane-design"
+                    type="button" role="tab">
+                <i class="bi bi-diagram-2 me-1"></i>Design Decisions
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- ======== HEALTH CHECK PANE ======== -->
+        <div class="tab-pane fade" th:classappend="${initialTab == 'health'} ? 'show active'"
+             id="pane-health" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <p class="mb-0">
+                    Pre-flight sanity checks. Run this before a thesis demo — catches silent issues
+                    (missing features, unscored explanations, no LLM provider) before they show up
+                    as "why is this number so weird?"
+                </p>
+                <button class="btn btn-sm btn-outline-primary flex-shrink-0" id="refreshBtn">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Re-run checks
+                </button>
+            </div>
+            <div id="overallBanner" class="mb-3"></div>
+            <div class="row g-3 mb-3">
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--success">
+                        <div class="metric-tile__value" id="passCount">—</div>
+                        <div class="metric-tile__label">Passed</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--warning">
+                        <div class="metric-tile__value" id="warnCount">—</div>
+                        <div class="metric-tile__label">Warnings</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--danger">
+                        <div class="metric-tile__value" id="failCount">—</div>
+                        <div class="metric-tile__label">Failures</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--primary">
+                        <div class="metric-tile__value" id="totalCount">—</div>
+                        <div class="metric-tile__label">Total checks</div>
+                    </div>
+                </div>
+            </div>
+            <div id="checksContainer">
+                <div class="empty-state">
+                    <div class="empty-state__icon"><i class="bi bi-hourglass-split"></i></div>
+                    <div class="empty-state__title">Running checks…</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======== PERFORMANCE PANE ======== -->
+        <div class="tab-pane fade" th:classappend="${initialTab == 'perf'} ? 'show active'"
+             id="pane-perf" role="tabpanel">
+            <p class="text-muted mb-3" style="font-size:0.88rem">
+                Live p50/p95/p99 latency, throughput counters, and cost totals per pipeline phase.
+                All numbers come from Micrometer timers + counters exposed via the
+                <code>/actuator/metrics</code> API — same data Prometheus sees. Refreshes every 5 seconds.
+            </p>
+            <div class="row g-3 mb-3">
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--primary">
+                        <div class="metric-tile__value" id="ingestCounter">—</div>
+                        <div class="metric-tile__label">
+                            Transactions imported
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Counter finguard.ingestion.transactions.imported — cumulative since process start."></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--danger">
+                        <div class="metric-tile__value" id="alertsCounter">—</div>
+                        <div class="metric-tile__label">
+                            Alerts created
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Counter finguard.detection.alerts.created — sum across all detection runs since startup."></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--warning">
+                        <div class="metric-tile__value" id="llmCalls">—</div>
+                        <div class="metric-tile__label">
+                            LLM calls
+                            <span id="llmAttemptsSuffix" class="text-muted small"></span>
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="finguard.llm.calls.total — logical calls. Number after slash is finguard.llm.attempts.total (includes retries). attempts &gt; calls = retries happening."></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="metric-tile metric-tile--info">
+                        <div class="metric-tile__value" id="ragSearches">—</div>
+                        <div class="metric-tile__label">
+                            RAG searches
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="finguard.rag.searches.total — pgvector similarity searches performed during explanation generation."></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="bi bi-stopwatch me-2"></i>Latency Percentiles
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                        <tr>
+                            <th>Phase</th>
+                            <th class="text-end">Count</th>
+                            <th class="text-end">Mean</th>
+                            <th class="text-end">Max</th>
+                            <th class="text-end">Total</th>
+                        </tr>
+                        </thead>
+                        <tbody id="latencyBody">
+                            <tr><td colspan="5" class="text-muted text-center py-3">
+                                <span class="spinner-border spinner-border-sm me-1"></span>Loading metrics…
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-lg-6">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <i class="bi bi-hdd-network me-2"></i>HikariCP Connection Pool
+                        </div>
+                        <div class="card-body">
+                            <div id="hikariBody" class="text-muted">
+                                <span class="spinner-border spinner-border-sm me-1"></span>Loading…
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <i class="bi bi-memory me-2"></i>JVM Memory
+                        </div>
+                        <div class="card-body">
+                            <div id="jvmBody" class="text-muted">
+                                <span class="spinner-border spinner-border-sm me-1"></span>Loading…
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="bi bi-arrow-repeat me-2"></i>LLM Retry Health
+                </div>
+                <div class="card-body" id="retryBody">
+                    <span class="spinner-border spinner-border-sm me-1"></span>Loading…
+                </div>
+            </div>
+        </div>
+
+        <!-- ======== DESIGN DECISIONS PANE ======== -->
+        <div class="tab-pane fade" th:classappend="${initialTab == 'design'} ? 'show active'"
+             id="pane-design" role="tabpanel">
+            <p class="text-muted mb-3" style="font-size:0.88rem">
+                Defensive documentation for the thesis defence.
+                Each card states one choice, <em>why</em> it was made, what was considered instead, and the trade-offs accepted.
+            </p>
+
+            <!-- Jump menu -->
+            <div class="card mb-3">
+                <div class="card-body py-2 d-flex flex-wrap gap-2" style="font-size:0.82rem">
+                    <span class="text-muted me-1">Jump to:</span>
+                    <a href="#dd-architecture" class="badge bg-secondary text-decoration-none">Architecture</a>
+                    <a href="#dd-data"         class="badge bg-secondary text-decoration-none">Data</a>
+                    <a href="#dd-ml"           class="badge bg-secondary text-decoration-none">ML</a>
+                    <a href="#dd-llm"          class="badge bg-secondary text-decoration-none">LLM</a>
+                    <a href="#dd-evaluation"   class="badge bg-secondary text-decoration-none">Evaluation</a>
+                    <a href="#dd-security"     class="badge bg-secondary text-decoration-none">Security</a>
+                    <a href="#dd-performance"  class="badge bg-secondary text-decoration-none">Performance</a>
+                </div>
+            </div>
+
+            <h3 id="dd-architecture" class="mt-4 mb-3"><i class="bi bi-building me-2"></i>Architecture</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why 5 experimental configurations (RULES_ONLY → FULL_SYSTEM)?</div>
+                <div class="decision-card__a">
+                    The thesis question is <em>"does adding LLM / RAG / validation to a fraud detection pipeline
+                    provide measurable value over purely rule-based or ML-based detection?"</em> Testing isolated
+                    layers answers the <em>how much</em> question: each config adds exactly one stage relative to
+                    the previous, so the F1 / CAKR deltas attribute cleanly to that layer alone.
+                </div>
+                <div class="decision-card__alt">
+                    <strong>Considered:</strong> only RULES_ONLY + FULL_SYSTEM (simpler, but can't attribute which
+                    component drives the gain); continuous ablation over N layers (richer but much longer wall-clock).
+                </div>
+                <div class="decision-card__tradeoff">
+                    <strong>Trade-off:</strong> 5 configs × k-fold = 5× training + 5× detection cost. Mitigated by
+                    running configs back-to-back using the same feature computation (done once).
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why Spring Boot + clean architecture instead of a notebook?</div>
+                <div class="decision-card__a">
+                    The thesis examines a <em>system</em>, not a model. Reproducibility, observability, concurrency,
+                    database persistence, and a user-facing demo all matter more than training a single best model.
+                    Spring Boot gives these for free; notebooks don't.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why Java 25 with virtual threads rather than Python asyncio?</div>
+                <div class="decision-card__a">
+                    The hot paths are a mix of CPU-bound ML inference and I/O-bound LLM calls. Virtual threads
+                    (stable since Java 21, now on Java 25) let the same code block on I/O without exhausting
+                    a thread pool — ideal for the ~100-concurrent LLM calls a full CAKR evaluation triggers.
+                </div>
+            </div>
+
+            <h3 id="dd-data" class="mt-4 mb-3"><i class="bi bi-database me-2"></i>Data</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why PaySim as the primary dataset?</div>
+                <div class="decision-card__a">
+                    PaySim is a published, citable, synthetic mobile-money dataset with a realistic fraud base rate
+                    (~0.13%), real-world typologies (TRANSFER, CASH_OUT structuring), and 6.3M rows — large enough
+                    that performance claims are meaningful, small enough to run a full benchmark overnight.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why temporal train/test split, not random?</div>
+                <div class="decision-card__a">
+                    Fraud is a time-series phenomenon — fraudsters adapt. A random split lets features
+                    computed over sliding windows "peek into the future" during training, inflating metrics
+                    (<strong>audit finding A-5</strong>). The temporal cutoff at the 80th-percentile timestamp
+                    ensures training rows strictly precede test rows.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why PostgreSQL + pgvector instead of a dedicated vector DB?</div>
+                <div class="decision-card__a">
+                    Keeping fraud-pattern embeddings in the same database as transaction records lets RAG
+                    retrieval, detection, and analytics run inside one transactional system. pgvector's HNSW
+                    index hits &lt;10 ms for top-k=5 on thousands of patterns — within 2× of FAISS / Pinecone
+                    at this scale, without the operational complexity.
+                </div>
+            </div>
+
+            <h3 id="dd-ml" class="mt-4 mb-3"><i class="bi bi-cpu me-2"></i>Machine Learning</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why Random Forest + XGBoost ensemble?</div>
+                <div class="decision-card__a">
+                    Random Forest is bagging (variance reduction); XGBoost is boosting (bias reduction). They
+                    make different errors — combining them via higher-probability-wins gives better recall on
+                    the rare fraud class without sacrificing precision. RF also provides a stable baseline
+                    when the XGBoost JNI library is unavailable.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why parallel RF mini-forests (4×25 trees) instead of one 100-tree forest?</div>
+                <div class="decision-card__a">
+                    Tribuo's <code>RandomForestTrainer</code> builds trees sequentially — no internal parallelism.
+                    Splitting 100 trees into 4 independent mini-forests on 4 threads gives ~4× wall-clock speed-up.
+                    Inference averages probabilities across mini-forests — mathematically equivalent to the full
+                    forest's soft-vote output.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why reservoir sampling for legit training rows?</div>
+                <div class="decision-card__a">
+                    PaySim has ~0.13% fraud rate. Training on the full 6.3M rows wastes hours on obvious legit
+                    rows. Reservoir sampling keeps all ~8,500 fraud rows + a uniformly random sample of 200k legit
+                    rows — still imbalanced enough to test the model's handling of rare classes, 30× faster.
+                </div>
+            </div>
+
+            <h3 id="dd-llm" class="mt-4 mb-3"><i class="bi bi-robot me-2"></i>LLM</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why abstract behind Spring AI's ChatClient?</div>
+                <div class="decision-card__a">
+                    Writing directly against Anthropic's SDK or Ollama's would lock the codebase to one vendor.
+                    Spring AI gives one interface that works for Ollama (local default), Anthropic, OpenAI,
+                    and DeepSeek — provider switch is a Settings-UI click, which the "compare two judge LLMs"
+                    experiment needs.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why CAKR (Completeness, Actionability, Knowledge, Regulatory)?</div>
+                <div class="decision-card__a">
+                    Generic quality metrics (BLEU, ROUGE) measure surface similarity to a reference — pointless
+                    when there's no gold-standard explanation. CAKR scores what a compliance analyst actually
+                    cares about: does the explanation reference the right signals, suggest concrete actions,
+                    use real fraud typologies, and cite applicable regulations.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why store failed CAKR scores as NULL (not 0.0)?</div>
+                <div class="decision-card__a">
+                    The CAKR scale is [1, 5]. Storing a scoring failure as 0 puts it outside the scale and
+                    silently depresses <code>AVG()</code> in SQL (<strong>audit finding A-3</strong>). NULL
+                    is semantic: "no score" — SQL <code>AVG</code> skips it, so reported means reflect
+                    <em>actually evaluated</em> explanations.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why a local HallucinationValidator in addition to CAKR?</div>
+                <div class="decision-card__a">
+                    An LLM judge gives a <em>quality</em> score but can miss concrete factual errors (wrong
+                    amount, invented account ID). The local validator performs deterministic cross-checks
+                    against the source transaction — cheap, reproducible, catches things LLMs don't.
+                </div>
+            </div>
+
+            <h3 id="dd-evaluation" class="mt-4 mb-3"><i class="bi bi-graph-up me-2"></i>Evaluation</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why k-fold cross-validation?</div>
+                <div class="decision-card__a">
+                    A single 80/20 split's metrics depend on which 20% we picked. k-fold (typically k=5) runs
+                    k independent splits and reports mean ± stddev — makes the reported F1 / CAKR numbers
+                    defensible rather than a single point estimate.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why F1 as the headline detection metric?</div>
+                <div class="decision-card__a">
+                    Fraud is severely imbalanced (~0.13%). Accuracy is meaningless — a model that predicts
+                    "not fraud" for everything scores 99.87% accuracy. F1 balances precision (don't flood
+                    analysts with false alarms) against recall (don't let real fraud slip through).
+                </div>
+            </div>
+
+            <h3 id="dd-security" class="mt-4 mb-3"><i class="bi bi-shield-lock me-2"></i>Security</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why AES-256-GCM for LLM API key storage?</div>
+                <div class="decision-card__a">
+                    Authenticated encryption — catches tampering, not just confidentiality. 256-bit key is
+                    NIST-recommended; GCM uses a 12-byte random IV per encryption. Key material zeroed
+                    from heap after use (<code>ApiKeyEncryptor</code>).
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why Liquibase with <code>ddl-auto: validate</code>?</div>
+                <div class="decision-card__a">
+                    Liquibase changelogs are the single source of truth for schema. Hibernate's
+                    <code>update</code> mode can drift silently from what's checked into git.
+                    <code>validate</code> forces every deploy to match the declared schema exactly.
+                </div>
+            </div>
+
+            <h3 id="dd-performance" class="mt-4 mb-3"><i class="bi bi-speedometer me-2"></i>Performance</h3>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why PostgreSQL COPY instead of Hibernate <code>saveAll</code>?</div>
+                <div class="decision-card__a">
+                    COPY streams rows directly to the storage engine, bypassing query parsing + planning.
+                    ~10-50× faster than Hibernate's batched INSERTs on 6M-row imports. Fallback path uses
+                    per-row REQUIRES_NEW transactions so one bad row doesn't nuke the batch.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why bulk SQL with window functions for feature engineering?</div>
+                <div class="decision-card__a">
+                    Per-row feature computation requires 3+ DB round-trips per transaction. For 6.3M rows
+                    that's 19M queries — hours. A single bulk INSERT-SELECT with
+                    <code>RANGE BETWEEN INTERVAL '24 hours' PRECEDING</code> windows over
+                    <code>PARTITION BY sender</code> computes everything in one pass — ~1-3 minutes with
+                    parallel-worker GUC tuning.
+                </div>
+            </div>
+
+            <div class="decision-card">
+                <div class="decision-card__q">Why polling for job status, not WebSocket / SSE?</div>
+                <div class="decision-card__a">
+                    Single-user thesis deployment — the throughput + latency benefits of push don't manifest.
+                    Polling is transparently debuggable (curl the status endpoint), requires no proxy-buffering
+                    workarounds, and <code>FG.pollJob</code> keeps the implementation to one place.
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<style>
+/* Health-check cards */
+.hc-card {
+    background: var(--fg-card);
+    border: 1px solid var(--fg-border);
+    border-left: 4px solid var(--fg-border);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 0.65rem;
+    display: flex;
+    gap: 0.85rem;
+    align-items: flex-start;
+}
+.hc-card--pass { border-left-color: var(--fg-success); }
+.hc-card--warn { border-left-color: var(--fg-warning); }
+.hc-card--fail { border-left-color: var(--fg-danger); }
+.hc-icon {
+    flex: 0 0 auto;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.9rem;
+}
+.hc-icon--pass { background: rgba(34,197,94,0.18);  color: var(--fg-success); }
+.hc-icon--warn { background: rgba(245,158,11,0.18); color: var(--fg-warning); }
+.hc-icon--fail { background: rgba(239,68,68,0.18);  color: var(--fg-danger); }
+.hc-title { font-size: 0.95rem; font-weight: 600; color: var(--fg-text); margin-bottom: 0.15rem; }
+.hc-msg   { font-size: 0.86rem; color: var(--fg-text); line-height: 1.45; }
+.hc-hint  { font-size: 0.8rem;  color: var(--fg-muted); margin-top: 0.35rem; }
+.hc-details { font-size: 0.75rem; margin-top: 0.4rem; display: flex; gap: 0.7rem; flex-wrap: wrap; color: var(--fg-muted); }
+.hc-details span strong { color: var(--fg-text); font-variant-numeric: tabular-nums; }
+.hc-category { font-size: 0.7rem; font-weight: 700; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 1rem 0 0.5rem 0; }
+.hc-overall { border-radius: 12px; padding: 0.85rem 1.15rem; display: flex; align-items: center; gap: 0.75rem; font-size: 0.95rem; }
+.hc-overall--pass { background: rgba(34,197,94,0.10);  border: 1px solid rgba(34,197,94,0.3);  color: var(--fg-success); }
+.hc-overall--warn { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.3); color: var(--fg-warning); }
+.hc-overall--fail { background: rgba(239,68,68,0.10);  border: 1px solid rgba(239,68,68,0.3);  color: var(--fg-danger); }
+
+/* Design-decision cards */
+.decision-card {
+    background: var(--fg-card);
+    border: 1px solid var(--fg-border);
+    border-left: 3px solid var(--fg-primary);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.85rem;
+}
+.decision-card__q { font-weight: 600; font-size: 0.95rem; color: var(--fg-text); margin-bottom: 0.5rem; }
+.decision-card__a { font-size: 0.87rem; color: var(--fg-text); line-height: 1.55; margin-bottom: 0.55rem; }
+.decision-card__alt, .decision-card__tradeoff { font-size: 0.82rem; color: var(--fg-muted); line-height: 1.5; margin-top: 0.35rem; }
+.decision-card__alt strong, .decision-card__tradeoff strong { color: var(--fg-text); }
+
+/* Tab buttons — subtle dark styling matching the theme */
+#systemTabs .nav-link { color: var(--fg-muted); border-color: transparent; font-size: 0.9rem; }
+#systemTabs .nav-link:hover { color: var(--fg-text); border-color: transparent; background: rgba(255,255,255,0.02); }
+#systemTabs .nav-link.active { color: var(--fg-primary-h); background: var(--fg-card); border-color: var(--fg-border) var(--fg-border) transparent; }
+</style>
+
+<script>
+// ── Health Check (tab 1) — same logic as the standalone page ────────
+(function () {
+    const container = document.getElementById('checksContainer');
+    const banner    = document.getElementById('overallBanner');
+
+    async function refresh() {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state__icon">'
+            + '<i class="bi bi-hourglass-split"></i></div>'
+            + '<div class="empty-state__title">Running checks…</div></div>';
+        try {
+            const report = await FG.fetchJson('/api/v1/system/data-quality');
+            render(report);
+        } catch (err) {
+            banner.innerHTML = '<div class="hc-overall hc-overall--fail">'
+                + '<i class="bi bi-x-circle-fill"></i>'
+                + '<span>Failed to load health report: ' + FG.escapeHtml(err.message) + '</span></div>';
+            container.innerHTML = '';
+        }
+    }
+
+    function render(report) {
+        document.getElementById('passCount').textContent  = report.passed;
+        document.getElementById('warnCount').textContent  = report.warnings;
+        document.getElementById('failCount').textContent  = report.failed;
+        document.getElementById('totalCount').textContent = report.total;
+
+        const overallClass = report.overall === 'PASS' ? 'pass'
+                            : report.overall === 'WARN' ? 'warn' : 'fail';
+        const overallIcon = report.overall === 'PASS' ? 'check-circle-fill'
+                          : report.overall === 'WARN' ? 'exclamation-triangle-fill'
+                          : 'x-circle-fill';
+        const overallText = report.overall === 'PASS'
+            ? 'All checks passed — dataset + runtime look healthy.'
+            : report.overall === 'WARN'
+            ? report.warnings + ' warning(s) — thesis numbers will still be produced, but review them below.'
+            : report.failed + ' failure(s) — fix these before running a benchmark.';
+        banner.innerHTML = '<div class="hc-overall hc-overall--' + overallClass + '">'
+            + '<i class="bi bi-' + overallIcon + '"></i>'
+            + '<span>' + FG.escapeHtml(overallText) + '</span></div>';
+
+        const grouped = {};
+        report.checks.forEach(c => { (grouped[c.category] = grouped[c.category] || []).push(c); });
+
+        let html = '';
+        Object.entries(grouped).forEach(([cat, checks]) => {
+            html += '<div class="hc-category">' + FG.escapeHtml(cat) + '</div>';
+            checks.forEach(c => { html += cardHtml(c); });
+        });
+        container.innerHTML = html;
+    }
+
+    function cardHtml(c) {
+        const sev = c.severity.toLowerCase();
+        const iconName = sev === 'pass' ? 'check-lg' : sev === 'warn' ? 'exclamation-triangle' : 'x-lg';
+        let detailsHtml = '';
+        if (c.details && Object.keys(c.details).length > 0) {
+            detailsHtml = '<div class="hc-details">'
+                + Object.entries(c.details)
+                       .map(([k, v]) => '<span>' + FG.escapeHtml(k) + ': <strong>' + FG.escapeHtml(String(v)) + '</strong></span>')
+                       .join('')
+                + '</div>';
+        }
+        const hintHtml = c.hint
+            ? '<div class="hc-hint"><i class="bi bi-lightbulb me-1"></i>' + FG.escapeHtml(c.hint) + '</div>'
+            : '';
+        return '<div class="hc-card hc-card--' + sev + '" id="check-' + FG.escapeHtml(c.id) + '">'
+            + '<div class="hc-icon hc-icon--' + sev + '"><i class="bi bi-' + iconName + '"></i></div>'
+            + '<div class="flex-grow-1">'
+            + '<div class="hc-title">' + FG.escapeHtml(c.title) + '</div>'
+            + '<div class="hc-msg">' + FG.escapeHtml(c.message) + '</div>'
+            + hintHtml
+            + detailsHtml
+            + '</div></div>';
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', refresh);
+    refresh();
+})();
+
+// ── Performance (tab 2) — same logic as the standalone page ─────────
+(function () {
+    const COUNTERS = [
+        { id: 'ingestCounter', name: 'finguard.ingestion.transactions.imported' },
+        { id: 'alertsCounter', name: 'finguard.detection.alerts.created' },
+        { id: 'ragSearches',   name: 'finguard.rag.searches.total' }
+    ];
+    const LATENCY_TIMERS = [
+        { phase: 'Detection pipeline', name: 'finguard.detection.pipeline.duration' },
+        { phase: 'LLM call',           name: 'finguard.llm.call.duration' },
+        { phase: 'RAG search',         name: 'finguard.rag.search.duration' }
+    ];
+
+    async function fetchMetric(name) {
+        try { return await FG.fetchJson('/actuator/metrics/' + encodeURIComponent(name)); }
+        catch (e) { return null; }
+    }
+    function stat(m, s) { if (!m || !m.measurements) return null; const x = m.measurements.find(x => x.statistic === s); return x ? x.value : null; }
+    function fmtMs(sec) { if (sec == null) return '—'; return sec < 1 ? (sec*1000).toFixed(1) + 'ms' : sec.toFixed(2) + 's'; }
+    function fmtInt(v)  { return v == null ? '—' : Math.round(v).toLocaleString(); }
+
+    async function refresh() {
+        for (const c of COUNTERS) {
+            const m = await fetchMetric(c.name);
+            const v = stat(m, 'COUNT');
+            document.getElementById(c.id).textContent = fmtInt(v);
+        }
+        const [callM, attemptM] = await Promise.all([
+            fetchMetric('finguard.llm.calls.total'),
+            fetchMetric('finguard.llm.attempts.total')
+        ]);
+        const calls = stat(callM, 'COUNT'), attempts = stat(attemptM, 'COUNT');
+        document.getElementById('llmCalls').textContent = fmtInt(calls);
+        document.getElementById('llmAttemptsSuffix').textContent =
+            attempts != null ? ' / ' + fmtInt(attempts) + ' attempts' : '';
+
+        const failM = await fetchMetric('finguard.llm.calls.failures');
+        const fails = stat(failM, 'COUNT') || 0;
+        const retryPanel = document.getElementById('retryBody');
+        if (calls == null || calls === 0) {
+            retryPanel.innerHTML = '<span class="text-muted">No LLM calls yet.</span>';
+        } else {
+            const retryRatio = attempts != null ? (attempts / calls) : 1;
+            const extra = Math.max(0, (attempts || calls) - calls);
+            const failRate = (fails / calls) * 100;
+            const hc = retryRatio > 1.5 ? 'metric-tile--warning' : retryRatio > 1.2 ? 'metric-tile--info' : 'metric-tile--success';
+            retryPanel.innerHTML =
+                '<div class="row g-3">' +
+                '<div class="col-sm-4"><div class="metric-tile metric-tile--sm ' + hc + '">' +
+                '<div class="metric-tile__value">' + retryRatio.toFixed(2) + '×</div>' +
+                '<div class="metric-tile__label">attempts per logical call</div></div></div>' +
+                '<div class="col-sm-4"><div class="metric-tile metric-tile--sm metric-tile--primary">' +
+                '<div class="metric-tile__value">' + fmtInt(extra) + '</div>' +
+                '<div class="metric-tile__label">total retries fired</div></div></div>' +
+                '<div class="col-sm-4"><div class="metric-tile metric-tile--sm ' +
+                (fails > 0 ? 'metric-tile--danger' : 'metric-tile--success') + '">' +
+                '<div class="metric-tile__value">' + failRate.toFixed(1) + '%</div>' +
+                '<div class="metric-tile__label">final failure rate</div></div></div>' +
+                '</div>';
+        }
+
+        const latencyRows = [];
+        for (const t of LATENCY_TIMERS) {
+            const m = await fetchMetric(t.name);
+            const count = stat(m, 'COUNT'), total = stat(m, 'TOTAL_TIME'), max = stat(m, 'MAX');
+            const mean = (count > 0 && total != null) ? total / count : null;
+            latencyRows.push({ phase: t.phase, count, total, max, mean });
+        }
+        document.getElementById('latencyBody').innerHTML = latencyRows.map(r => {
+            if (r.count == null || r.count === 0) {
+                return '<tr><td>' + FG.escapeHtml(r.phase) + '</td>' +
+                       '<td colspan="4" class="text-muted text-center">no samples yet</td></tr>';
+            }
+            return '<tr><td>' + FG.escapeHtml(r.phase) + '</td>' +
+                '<td class="text-end">' + fmtInt(r.count) + '</td>' +
+                '<td class="text-end">' + fmtMs(r.mean) + '</td>' +
+                '<td class="text-end">' + fmtMs(r.max) + '</td>' +
+                '<td class="text-end">' + fmtMs(r.total) + '</td></tr>';
+        }).join('');
+
+        const [active, idle, max] = await Promise.all([
+            fetchMetric('hikaricp.connections.active'),
+            fetchMetric('hikaricp.connections.idle'),
+            fetchMetric('hikaricp.connections.max')
+        ]);
+        const activeV = stat(active, 'VALUE') || 0, idleV = stat(idle, 'VALUE') || 0, maxV = stat(max, 'VALUE') || 0;
+        const usedPct = maxV > 0 ? (activeV / maxV) * 100 : 0;
+        const bar = usedPct > 80 ? 'bg-danger' : usedPct > 60 ? 'bg-warning' : 'bg-success';
+        document.getElementById('hikariBody').innerHTML =
+            '<div class="d-flex justify-content-between small mb-1">' +
+            '<span>active <strong>' + activeV + '</strong> · idle <strong>' + idleV + '</strong> · max <strong>' + maxV + '</strong></span>' +
+            '<span class="text-muted">' + usedPct.toFixed(0) + '% used</span></div>' +
+            '<div class="progress" style="height:10px"><div class="progress-bar ' + bar + '" style="width:' + usedPct + '%"></div></div>';
+
+        const memUsed = await fetchMetric('jvm.memory.used'), memMax = await fetchMetric('jvm.memory.max');
+        const usedB = stat(memUsed, 'VALUE'), maxB = stat(memMax, 'VALUE');
+        if (usedB != null) {
+            const usedMb = usedB / (1024 * 1024), maxMb = maxB != null && maxB > 0 ? maxB / (1024 * 1024) : 0;
+            const pct = maxMb > 0 ? (usedMb / maxMb) * 100 : 0;
+            const bar2 = pct > 85 ? 'bg-danger' : pct > 70 ? 'bg-warning' : 'bg-success';
+            document.getElementById('jvmBody').innerHTML =
+                '<div class="d-flex justify-content-between small mb-1">' +
+                '<span>used <strong>' + usedMb.toFixed(0) + ' MB</strong>' +
+                (maxMb > 0 ? ' · max <strong>' + maxMb.toFixed(0) + ' MB</strong>' : '') + '</span>' +
+                (maxMb > 0 ? '<span class="text-muted">' + pct.toFixed(0) + '%</span>' : '') + '</div>' +
+                (maxMb > 0 ? '<div class="progress" style="height:10px"><div class="progress-bar ' + bar2 + '" style="width:' + pct + '%"></div></div>' : '');
+        } else {
+            document.getElementById('jvmBody').textContent = 'jvm.memory.used not exposed';
+        }
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+})();
+</script>
+</body>
+</html>

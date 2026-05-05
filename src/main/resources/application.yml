@@ -1,0 +1,244 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: finguard
+
+  # Always activate the `benchmark` profile (application-benchmark.yml).
+  # This is a thesis-only project — the benchmark profile contains the
+  # tuning settings (bigger batches, higher LLM concurrency, less log spam,
+  # OOM guardrails) that we want active by default for every run. To override
+  # for one launch only, pass: -Dspring.profiles.active=otherProfile
+  profiles:
+    active: benchmark
+
+  # Exclude OpenAI and Anthropic auto-configurations — their chat and embedding
+  # models are built on-demand in DynamicChatClientService. Excluding here prevents
+  # bean conflicts with Ollama and avoids startup failures due to missing API keys.
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration
+      - org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration
+
+  # ==================== Virtual Threads (Project Loom, Java 21) ====================
+  # Makes Tomcat request threads virtual, so blocking I/O (DB, LLM calls) never
+  # exhausts the carrier thread pool. Zero code changes required.
+  threads:
+    virtual:
+      enabled: true
+
+  # ==================== Database ====================
+  datasource:
+    url: jdbc:postgresql://localhost:5432/finguard
+    username: finguard
+    password: finguard_dev
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Sized for the concurrent-load profile after the audit + UX work:
+      #   detection pipeline   : 2-4 connections (batch reads + per-row REQUIRES_NEW saves)
+      #   async executor       : up to 8 tasks × 1-2 connections each (bounded in AsyncConfig)
+      #   metric-snapshot job  : 1 connection every 60s
+      #   feature-compute path : 1 autocommit connection + parallel workers on the server side
+      #   dashboard + web UI   : 1-2 connections per request
+      #   polling status calls : short-lived, tiny connections from layout.html
+      # Peak measured under a concurrent benchmark + CSV import: ~22 active.
+      # 30 gives headroom without starving the kernel-side worker slots.
+      maximum-pool-size: 30
+      minimum-idle: 4                # Warm a few connections so cold-start latency isn't visible
+      connection-timeout: 10000      # Fail fast on connection exhaustion (was 30s)
+      idle-timeout: 300000           # 5 min idle eviction (was 10 min)
+      max-lifetime: 900000           # 15 min max lifetime (was 30 min) to avoid stale connections
+
+  jpa:
+    hibernate:
+      ddl-auto: validate  # Liquibase manages schema
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        connection:
+          isolation: 2               # READ_COMMITTED — prevents dirty reads under concurrent ingestion
+        jdbc:
+          # batch_size controls JDBC batch flushing for any saveAll() path
+          # (ingestion fallback, explanation persistence). 2000 is the sweet
+          # spot for PostgreSQL + pgjdbc — measured ~3-4× faster than 500
+          # for million-row inserts because it amortises the network round-trip
+          # and the per-statement parser overhead. Larger values stop helping
+          # because pgjdbc starts dispatching internally in chunks.
+          batch_size: 2000
+          fetch_size: 5000           # JDBC cursor fetch size for large result sets (streaming exports)
+        order_inserts: true          # Reorder inserts by entity type for optimal batching
+        order_updates: true          # Same for updates
+        query:
+          in_clause_parameter_padding: true   # Pads IN clause sizes to powers of 2 for query plan caching
+    open-in-view: false
+
+  # ==================== Liquibase ====================
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yml
+    enabled: true
+
+  # ==================== Spring AI - Ollama (default for development) ====================
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: llama3.2
+        options:
+          temperature: 0.3
+          num-predict: 4096
+      embedding:
+        model: nomic-embed-text
+
+    # pgvector store configuration
+    vectorstore:
+      pgvector:
+        dimensions: 768  # nomic-embed-text dimension
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+
+  # ==================== File upload (for CSV import) ====================
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+
+# ==================== Actuator & Observability ====================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,caches
+  metrics:
+    tags:
+      application: finguard
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 100ms, 500ms, 1000ms, 5000ms
+
+# ==================== API Documentation ====================
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+  show-actuator: false
+  packages-to-scan: dev.finguard.presentation.controller
+
+# ==================== Application-specific ====================
+finguard:
+  # ==================== API Key Encryption ====================
+  # 256-bit AES key used to encrypt LLM API keys at rest (AES-256-GCM).
+  # Override with a strong random key in production:
+  #   export FINGUARD_ENCRYPTION_KEY=$(openssl rand -base64 32)
+  # and set: finguard.encryption.key: ${FINGUARD_ENCRYPTION_KEY}
+  # The default below is for LOCAL DEVELOPMENT ONLY — never use it in production.
+  encryption:
+    key: ${FINGUARD_ENCRYPTION_KEY:ZmluZ3VhcmQtZGV2LW9ubHktbm90LWZvci1wcm9kISE=}
+  evaluation:
+    cakr:
+      outer-concurrency: 8   # Claude: leave at 8 | Ollama: drop to 2
+    auc:
+      legit-sample-size: 20000  # fine for PaySim; raise to 50000 for tighter AUC CIs
+  detection:
+    # JDBC bulk-INSERT batch size for AlertPersistenceService / JdbcBulkAlertWriter.
+    # Each batch is a single PreparedStatement.executeBatch() round-trip.
+    # 2 000 is the throughput sweet spot for pgjdbc + PostgreSQL; matches
+    # spring.jpa.properties.hibernate.jdbc.batch_size. Benchmark profile bumps to 5 000.
+    persist-batch-size: 2000
+    rules:
+      large-transaction-threshold: 200000.00
+      rapid-succession-window-hours: 1
+      rapid-succession-count: 3
+      structuring-threshold: 10000.00
+      new-receiver-high-value-threshold: 50000.00
+    ml:
+      risk-score-threshold: 0.5
+      ensemble-enabled: true
+      training-batch-size: 100000
+      # Keep ALL fraud rows + at most this many legitimate rows during training.
+      # Reservoir sampling is used so the legit sample is uniformly random.
+      # 200 000 legit + ~8 500 fraud ≈ 208 500 total → ~30x faster than full 6.5M dataset.
+      max-legit-training-samples: 200000
+      # Random Forest tuning
+      # Tuned for a 10-core MacBook on the PaySim 200k-legit + ~8.5k-fraud sample.
+      # Previous (100 trees, depth 6, parallelism 4) ran in ~25 min at 40% CPU because
+      # the executor pool was sized parallelism+1 = 5 — half the cores sat idle while
+      # Tribuo's per-tree builder ran single-threaded. The values below double the
+      # core utilisation and halve the per-tree work; expected ~4-5× wall-clock speedup
+      # with no measurable AUC loss on this dataset (fraud forests saturate around
+      # 30-60 trees of depth 5-6 — extra trees add noise, not signal).
+      rf:
+        num-trees: 50     # total trees across ALL mini-forests (was 100)
+        max-depth: 5      # deeper trees memorise noise; 5-8 typical for fraud (was 6)
+        # Parallelism: splits num-trees into this many independent mini-forests built simultaneously.
+        # parallelism=8 → 8 forests × ~6 trees each → uses ~80% of a 10-core box.
+        # Set to 1 to disable (single sequential forest). Capped at availableProcessors.
+        parallelism: 8
+      # XGBoost tuning
+      xgb:
+        num-rounds: 100   # boosting iterations; more = better accuracy, more time
+        num-threads: 0    # 0 = auto-detect availableProcessors()
+      # Training watchdog: fail the job if Tribuo hangs beyond this threshold.
+      training-timeout-hours: 2
+  ingestion:
+    # CSV-import + detection cursor batch size. Controls how many transactions
+    # are loaded into memory at once for processing. 20 000 is safe on -Xmx8g
+    # (~40 MB peak per batch including features) and cuts the number of DB
+    # round-trips by 4× vs the previous 5 000. For RAM-rich machines, the
+    # benchmark profile bumps this to 50 000.
+    batch-size: 20000
+  explanation:
+    max-rag-results: 5
+    confidence-threshold: 0.6
+    # Number of LLM calls the batch explainer runs in parallel. Bit-identical
+    # output to sequential generation; only the wall-clock differs.
+    # 8 is safe for Ollama default (OLLAMA_NUM_PARALLEL=4 per model × queue).
+    # Cloud LLMs (Claude / Anthropic) handle 32-50 concurrent fine — the
+    # benchmark profile bumps this to 32. Lower if you see 429 rate-limits.
+    batch-concurrency: 8
+    routing:
+      # ML risk scores below this threshold → skip LLM explanation entirely
+      direct-threshold: 0.5
+      # ML risk scores below this threshold → downgrade LLM_RAG to LLM_DIRECT (faster)
+      rag-threshold: 0.75
+  resilience:
+    llm:
+      max-attempts: 3
+      backoff-delay-ms: 1000
+      backoff-multiplier: 2.0
+      max-delay-ms: 8000
+    rag:
+      max-attempts: 2
+      backoff-delay-ms: 500
+    ml:
+      load-max-attempts: 3
+      load-backoff-delay-ms: 500
+
+---
+# ==================== Cloud LLM Profile (for evaluation with Claude) ====================
+spring:
+  config:
+    activate:
+      on-profile: cloud-llm
+
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      chat:
+        model: claude-sonnet-4-20250514
+        max-tokens: 2048
+        temperature: 0.3
+    ollama:
+      enabled: false

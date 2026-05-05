@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — User Guide')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="bi bi-journal-bookmark me-2"></i>User Guide</h1>
+        <p>Everything you need to know to get up and running with FinGuard</p>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- Hero: Quick Start Pipeline                                      -->
+    <!-- ============================================================== -->
+    <div class="guide-hero">
+        <div class="guide-hero-title">
+            <i class="bi bi-lightning-charge-fill"></i> Quick Start Pipeline
+        </div>
+        <div class="guide-pipeline">
+            <div class="guide-pipeline-step">
+                <div class="step-icon s1">
+                    <i class="bi bi-upload"></i>
+                    <span class="step-num">1</span>
+                </div>
+                <div class="step-title">Ingest Data</div>
+                <div class="step-desc">Upload a PaySim CSV file</div>
+                <a class="step-link" href="/ingestion">Data Ingestion &rarr;</a>
+            </div>
+            <div class="guide-pipeline-connector"><i class="bi bi-chevron-right"></i></div>
+            <div class="guide-pipeline-step">
+                <div class="step-icon s2">
+                    <i class="bi bi-gear"></i>
+                    <span class="step-num">2</span>
+                </div>
+                <div class="step-title">Compute Features</div>
+                <div class="step-desc">Z-scores, velocity, diversity</div>
+                <a class="step-link" href="/ingestion">Same page &rarr;</a>
+            </div>
+            <div class="guide-pipeline-connector"><i class="bi bi-chevron-right"></i></div>
+            <div class="guide-pipeline-step">
+                <div class="step-icon s3">
+                    <i class="bi bi-cpu"></i>
+                    <span class="step-num">3</span>
+                </div>
+                <div class="step-title">Train Models</div>
+                <div class="step-desc">Random Forest + XGBoost</div>
+                <a class="step-link" href="/models">ML Models &rarr;</a>
+            </div>
+            <div class="guide-pipeline-connector"><i class="bi bi-chevron-right"></i></div>
+            <div class="guide-pipeline-step">
+                <div class="step-icon s4">
+                    <i class="bi bi-book"></i>
+                    <span class="step-num">4</span>
+                </div>
+                <div class="step-title">Seed Knowledge</div>
+                <div class="step-desc">Fraud patterns for RAG</div>
+                <a class="step-link" href="/knowledge">Knowledge Base &rarr;</a>
+            </div>
+            <div class="guide-pipeline-connector"><i class="bi bi-chevron-right"></i></div>
+            <div class="guide-pipeline-step">
+                <div class="step-icon s5">
+                    <i class="bi bi-search"></i>
+                    <span class="step-num">5</span>
+                </div>
+                <div class="step-title">Run Detection</div>
+                <div class="step-desc">Pick a config, analyze</div>
+                <a class="step-link" href="/detection">Run Detection &rarr;</a>
+            </div>
+            <div class="guide-pipeline-connector"><i class="bi bi-chevron-right"></i></div>
+            <div class="guide-pipeline-step">
+                <div class="step-icon s6">
+                    <i class="bi bi-bar-chart-line"></i>
+                    <span class="step-num">6</span>
+                </div>
+                <div class="step-title">Review Results</div>
+                <div class="step-desc">Alerts, explanations, export</div>
+                <a class="step-link" href="/">Dashboard &rarr;</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- Tab Navigation                                                  -->
+    <!-- ============================================================== -->
+    <ul class="nav guide-tabs mb-4" id="guideTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button">
+                <i class="bi bi-info-circle me-1"></i>Overview
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ingestion" type="button">
+                <i class="bi bi-upload me-1"></i>1. Ingestion
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-models" type="button">
+                <i class="bi bi-cpu me-1"></i>2. ML Models
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-knowledge" type="button">
+                <i class="bi bi-book me-1"></i>3. Knowledge
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-detection" type="button">
+                <i class="bi bi-search me-1"></i>4. Detection
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-review" type="button">
+                <i class="bi bi-eye me-1"></i>5. Review
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-evaluation" type="button">
+                <i class="bi bi-graph-up me-1"></i>6. Evaluation
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-api" type="button">
+                <i class="bi bi-braces me-1"></i>API
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="guideTabContent">
+
+        <!-- ========== Overview ========== -->
+        <div class="tab-pane fade show active" id="tab-overview" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-shield-check"></i> What is FinGuard?
+                    </div>
+                    <p>
+                        FinGuard is an LLM-augmented transaction anomaly detection system. It combines
+                        rule-based checks, machine learning models, and large language model explanations
+                        to detect and explain potentially fraudulent financial transactions.
+                    </p>
+
+                    <div class="guide-subtitle">System Architecture</div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="guide-arch-card">
+                                <div class="guide-arch-icon primary"><i class="bi bi-funnel-fill"></i></div>
+                                <strong>Ingestion Layer</strong>
+                                <p class="small mb-0 text-muted">Imports PaySim CSV datasets, parses and validates rows, computes engineered features (z-scores, velocity, diversity metrics).</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="guide-arch-card">
+                                <div class="guide-arch-icon warning"><i class="bi bi-exclamation-triangle-fill"></i></div>
+                                <strong>Detection Pipeline</strong>
+                                <p class="small mb-0 text-muted">Configurable chain: rule-based threshold checks, Tribuo ML models (Random Forest + XGBoost), alert generation with risk scores.</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="guide-arch-card">
+                                <div class="guide-arch-icon success"><i class="bi bi-chat-left-text-fill"></i></div>
+                                <strong>Explanation Engine</strong>
+                                <p class="small mb-0 text-muted">LLM-generated explanations with optional RAG context from a fraud pattern knowledge base. Evaluated via CAKR scoring.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-subtitle">Detection Configurations</div>
+                    <p>Each detection run uses one of these pipeline configurations:</p>
+                    <div class="table-responsive">
+                        <table class="table guide-config-table">
+                            <thead>
+                                <tr>
+                                    <th>Config</th>
+                                    <th>Rules</th>
+                                    <th>ML</th>
+                                    <th>LLM</th>
+                                    <th>RAG</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>RULES_ONLY</code></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td>Threshold-based detection only. No ML or AI models needed.</td>
+                                </tr>
+                                <tr>
+                                    <td><code>ML_ONLY</code></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td>ML classification only. Requires trained models.</td>
+                                </tr>
+                                <tr>
+                                    <td><code>ML_LLM_DIRECT</code></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td>ML detection + direct LLM explanation (no knowledge base).</td>
+                                </tr>
+                                <tr>
+                                    <td><code>ML_LLM_RAG</code></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td>ML detection + RAG-augmented LLM explanation.</td>
+                                </tr>
+                                <tr>
+                                    <td><code>FULL_SYSTEM</code></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td>All stages combined. Full pipeline.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="guide-subtitle">Prerequisites</div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="guide-prereq">
+                                <i class="bi bi-database-fill prereq-icon prereq-icon--info"></i>
+                                <div>
+                                    <strong>PostgreSQL 16 + pgvector</strong>
+                                    <div class="small text-muted">Database with vector extension for RAG embeddings</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="guide-prereq">
+                                <i class="bi bi-robot prereq-icon prereq-icon--primary"></i>
+                                <div>
+                                    <strong>Ollama (for LLM configs)</strong>
+                                    <div class="small text-muted">Local LLM inference. Not required for RULES_ONLY or ML_ONLY.</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="guide-prereq">
+                                <i class="bi bi-cup-hot-fill prereq-icon prereq-icon--warning"></i>
+                                <div>
+                                    <strong>Java 25</strong>
+                                    <div class="small text-muted">Runtime environment for the Spring Boot 3.5 application</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="guide-prereq">
+                                <i class="bi bi-file-earmark-spreadsheet-fill prereq-icon prereq-icon--success"></i>
+                                <div>
+                                    <strong>PaySim Dataset (CSV)</strong>
+                                    <div class="small text-muted">Synthetic data. Test file bundled at <code>data/test-transactions.csv</code></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 1. Data Ingestion ========== -->
+        <div class="tab-pane fade" id="tab-ingestion" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-upload"></i> Step 1: Import Transaction Data
+                    </div>
+                    <p>Navigate to <a href="/ingestion">Data Ingestion</a> to import transaction datasets into the system.</p>
+
+                    <div class="guide-subtitle">Test Data</div>
+                    <p>
+                        A small test dataset is included at
+                        <code>src/main/resources/data/test-transactions.csv</code> with sample PaySim
+                        transactions including fraud cases for TRANSFER and CASH_OUT types.
+                    </p>
+                    <p>
+                        For the full dataset, download <strong>PaySim</strong> from
+                        <a href="https://www.kaggle.com/datasets/ealaxi/paysim1" target="_blank" rel="noopener">Kaggle</a>
+                        (~6.3 million rows, ~500 MB).
+                    </p>
+
+                    <div class="guide-subtitle">Expected CSV Format</div>
+                    <div class="guide-code">
+                        step,type,amount,nameOrig,oldbalanceOrg,newbalanceOrig,nameDest,oldbalanceDest,newbalanceDest,isFraud,isFlaggedFraud
+                    </div>
+
+                    <div class="guide-subtitle">Import Options</div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-6">
+                            <div class="guide-option-card">
+                                <strong><i class="bi bi-cloud-upload me-2"></i>Upload CSV</strong>
+                                <p class="small mt-2 mb-0 text-muted">Upload the CSV file directly from your browser. Best for files up to ~200 MB.</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="guide-option-card">
+                                <strong><i class="bi bi-hdd-network me-2"></i>Server Path</strong>
+                                <p class="small mt-2 mb-0 text-muted">Specify a file path on the server. Best for large datasets already on the filesystem.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-subtitle">Compute Features</div>
+                    <p>
+                        After importing, click <strong>"Compute Features"</strong> on the same page.
+                        This computes engineered features for all transactions that don't have them yet:
+                    </p>
+                    <ul class="guide-feature-list">
+                        <li><strong>Amount z-score</strong> &mdash; how unusual the amount is relative to the sender's history</li>
+                        <li><strong>Transaction velocity</strong> &mdash; frequency of transactions in 1h and 24h windows</li>
+                        <li><strong>Receiver diversity</strong> &mdash; number of unique recipients for the sender</li>
+                        <li><strong>Balance change ratios</strong> &mdash; proportional changes in origin/destination balances</li>
+                    </ul>
+                    <div class="guide-tip">
+                        <i class="bi bi-lightbulb-fill text-warning"></i>
+                        <span>Features must be computed before training ML models or running any ML-based detection config.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 2. ML Models ========== -->
+        <div class="tab-pane fade" id="tab-models" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-cpu"></i> Step 2: Train ML Models
+                    </div>
+                    <p>Navigate to <a href="/models">ML Models</a> to train and manage the detection models.</p>
+
+                    <div class="guide-subtitle">Available Models</div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-6">
+                            <div class="guide-option-card">
+                                <strong><i class="bi bi-tree me-2"></i>Random Forest</strong>
+                                <p class="small mt-2 mb-0 text-muted">Ensemble of decision trees. Good baseline with interpretable feature importances.</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="guide-option-card">
+                                <strong><i class="bi bi-diagram-3 me-2"></i>XGBoost</strong>
+                                <p class="small mt-2 mb-0 text-muted">Gradient-boosted trees. Typically higher accuracy for tabular fraud detection.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-subtitle">Steps</div>
+                    <ol class="guide-steps-list">
+                        <li>Click <strong>"Train Models"</strong> &mdash; trains both models on all transactions with features. The fraud label from the dataset is used as the training target.</li>
+                        <li>Wait for training to complete. Status will show <strong>"Models available"</strong> when done.</li>
+                        <li>If the application restarts, click <strong>"Load Models"</strong> to reload previously trained model files from disk.</li>
+                    </ol>
+
+                    <div class="guide-tip">
+                        <i class="bi bi-lightbulb-fill text-warning"></i>
+                        <span>Training requires computed features. If you see zero features, go back to Ingestion and run "Compute Features" first.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 3. Knowledge Base ========== -->
+        <div class="tab-pane fade" id="tab-knowledge" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-book"></i> Step 3: Seed the Knowledge Base
+                    </div>
+                    <p>Navigate to <a href="/knowledge">Knowledge Base</a> to populate the fraud pattern database.</p>
+
+                    <div class="guide-subtitle">What is the Knowledge Base?</div>
+                    <p>
+                        The knowledge base stores known fraud patterns (e.g., "structuring", "account takeover",
+                        "money mule") as vector embeddings in PostgreSQL with pgvector. When the detection
+                        pipeline generates LLM explanations in RAG mode, it retrieves the most relevant
+                        patterns to provide rich context to the LLM, improving explanation quality.
+                    </p>
+
+                    <div class="guide-subtitle">pgvector &mdash; How RAG Actually Works</div>
+                    <p>
+                        <strong>pgvector</strong> is a PostgreSQL extension that stores high-dimensional
+                        vectors and lets you search them by cosine / L2 / inner-product similarity. FinGuard
+                        uses it as its Retrieval-Augmented Generation (RAG) backing store.
+                    </p>
+                    <ol class="guide-steps-list">
+                        <li><strong>Table</strong> &mdash; <code>vector_store</code> (columns: <code>id UUID</code>,
+                            <code>content TEXT</code>, <code>metadata JSONB</code>,
+                            <code>embedding VECTOR(768)</code>).</li>
+                        <li><strong>Index</strong> &mdash; HNSW on <code>embedding</code> with cosine distance;
+                            sub-millisecond top-K lookup up to millions of rows.</li>
+                        <li><strong>Populated by</strong> <code>FraudPatternSeeder</code> &mdash; for every row
+                            in the <code>fraud_patterns</code> table, the pattern title + description is
+                            embedded via <code>nomic-embed-text</code> (768 dimensions) and inserted.</li>
+                        <li><strong>Queried by</strong> <code>RAGContextService.retrieveContext()</code>
+                            whenever an alert needs an LLM explanation in <code>ML_LLM_RAG</code> or
+                            <code>FULL_SYSTEM</code> config: the alert's signal text is embedded, the
+                            <code>topK = 5</code> most similar patterns are fetched, and they are injected
+                            into the LLM prompt as "here is what known fraud looks like &mdash; is this alert similar?".</li>
+                        <li><strong>Tunable</strong> &mdash; <code>finguard.explanation.max-rag-results</code>
+                            in <code>application.yml</code>. Bigger = richer context but slower/costlier LLM calls.</li>
+                    </ol>
+                    <p>
+                        Without pgvector seeded, <code>ML_LLM_RAG</code> degenerates to <code>ML_LLM_DIRECT</code>:
+                        no retrieval means no retrieved context means the LLM gets the same prompt either way.
+                    </p>
+
+                    <div class="guide-subtitle">How to Seed</div>
+                    <ol class="guide-steps-list">
+                        <li>Click <strong>"Seed Knowledge Base"</strong> on the Knowledge Base page.</li>
+                        <li>This inserts a curated set of fraud patterns and computes their vector embeddings via the configured embedding model.</li>
+                        <li>The patterns table will populate showing each pattern's name, category, and description.</li>
+                    </ol>
+
+                    <div class="guide-tip">
+                        <i class="bi bi-lightbulb-fill text-warning"></i>
+                        <span>The knowledge base is required for <code>ML_LLM_RAG</code> and <code>FULL_SYSTEM</code> configs. Not needed for <code>RULES_ONLY</code>, <code>ML_ONLY</code>, or <code>ML_LLM_DIRECT</code>.</span>
+                    </div>
+
+                    <div class="guide-info mt-3">
+                        <i class="bi bi-info-circle-fill prereq-icon--primary"></i>
+                        <span>Seeding requires a running Ollama instance (or configured embedding provider) to generate vector embeddings.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 4. Detection ========== -->
+        <div class="tab-pane fade" id="tab-detection" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-search"></i> Step 4: Run the Detection Pipeline
+                    </div>
+                    <p>Navigate to <a href="/detection">Run Detection</a> to analyze transactions for anomalies.</p>
+
+                    <div class="guide-subtitle">How to Run</div>
+                    <ol class="guide-steps-list">
+                        <li>Select a <strong>Detection Configuration</strong> from the dropdown (see Overview tab for comparison).</li>
+                        <li>Click <strong>"Run Detection"</strong> &mdash; the pipeline analyzes all unprocessed transactions.</li>
+                        <li>The system processes in batches and skips transactions that already have alerts for the selected config.</li>
+                        <li>When complete, the result panel shows how many alerts were created.</li>
+                    </ol>
+
+                    <div class="guide-subtitle">Requirements per Config</div>
+                    <div class="table-responsive">
+                        <table class="table guide-config-table">
+                            <thead>
+                                <tr>
+                                    <th>Config</th>
+                                    <th>Features</th>
+                                    <th>Trained Models</th>
+                                    <th>Ollama</th>
+                                    <th>Knowledge Base</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>RULES_ONLY</code></td>
+                                    <td><span class="metric-medium">Helpful</span></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                </tr>
+                                <tr>
+                                    <td><code>ML_ONLY</code></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                </tr>
+                                <tr>
+                                    <td><code>ML_LLM_DIRECT</code></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-dash-circle icon-na"></i></td>
+                                </tr>
+                                <tr>
+                                    <td><code>ML_LLM_RAG</code></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                </tr>
+                                <tr>
+                                    <td><code>FULL_SYSTEM</code></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                    <td><i class="bi bi-check-circle-fill text-success"></i></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="guide-subtitle">Async Execution</div>
+                    <p>
+                        For large datasets, the pipeline can run asynchronously via the REST API:
+                    </p>
+                    <div class="guide-code">
+                        POST /api/v1/detection/run/async?config=FULL_SYSTEM  &rarr;  returns jobId<br>
+                        GET  /api/v1/detection/status/{jobId}                &rarr;  poll progress
+                    </div>
+
+                    <div class="guide-tip mt-3">
+                        <i class="bi bi-lightbulb-fill text-warning"></i>
+                        <span>Start with <code>RULES_ONLY</code> to verify your data pipeline works before moving to ML-based configs.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 5. Review & Export ========== -->
+        <div class="tab-pane fade" id="tab-review" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-eye"></i> Step 5: Review Results &amp; Export
+                    </div>
+
+                    <div class="guide-subtitle">Dashboard</div>
+                    <p>
+                        The <a href="/">Dashboard</a> provides a system-wide overview: total transactions,
+                        alerts created, fraud detection rate, alert breakdowns by status and config,
+                        CAKR quality scores, and experiment summaries.
+                    </p>
+
+                    <div class="guide-subtitle">Alerts</div>
+                    <p>
+                        <a href="/alerts">Alerts</a> shows every alert generated by the pipeline.
+                        Filter by status (<code>NEW</code>, <code>REVIEWED</code>, <code>CONFIRMED_FRAUD</code>,
+                        <code>FALSE_POSITIVE</code>) or by detection config.
+                    </p>
+                    <p>
+                        Click an alert to see full details: the original transaction, ML risk score,
+                        feature importances, triggered rules, and all LLM explanations.
+                        You can update the alert status from the detail page.
+                    </p>
+
+                    <div class="guide-subtitle">Explanations</div>
+                    <p>
+                        <a href="/explanations">Explanations</a> lists all LLM-generated explanations with
+                        quality metrics: CAKR scores (Completeness, Correctness, Actionability, Regulatory),
+                        token counts, latency, and hallucination detection results.
+                    </p>
+
+                    <div class="guide-subtitle">CSV Export</div>
+                    <p>Export results for external analysis via the REST API:</p>
+                    <div class="guide-code">
+                        GET /api/v1/export/alerts                        &rarr;  all alerts as CSV<br>
+                        GET /api/v1/export/alerts?config=FULL_SYSTEM     &rarr;  filter by config<br>
+                        GET /api/v1/export/experiments                   &rarr;  experiment metrics as CSV<br>
+                        GET /api/v1/export/experiments?name=baseline     &rarr;  filter by name
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 6. Evaluation ========== -->
+        <div class="tab-pane fade" id="tab-evaluation" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-graph-up"></i> Step 6: Run Experiments
+                    </div>
+                    <p>Navigate to <a href="/evaluation">Evaluation</a> to benchmark different detection configurations.</p>
+
+                    <div class="guide-subtitle">What Experiments Do</div>
+                    <p>
+                        An experiment runs the detection pipeline with a specific configuration and records
+                        performance metrics: precision, recall, F1-score, processing time, and explanation
+                        quality (CAKR scores). This lets you compare how well different configs perform.
+                    </p>
+
+                    <div class="guide-subtitle">How to Run</div>
+                    <ol class="guide-steps-list">
+                        <li>Enter an <strong>experiment name</strong> (e.g., "baseline-rules", "full-system-v1").</li>
+                        <li>Select a <strong>detection config</strong> from the dropdown.</li>
+                        <li>Optionally filter to a specific <strong>dataset source</strong>.</li>
+                        <li>Click <strong>"Run Experiment"</strong> and wait for completion.</li>
+                        <li>Results appear in the table below with all computed metrics.</li>
+                    </ol>
+
+                    <div class="guide-subtitle">Comparing Experiments</div>
+                    <p>
+                        Use the <strong>"Compare"</strong> button for a side-by-side comparison of
+                        experiment runs. This is useful for evaluating the impact of adding RAG context,
+                        switching configs, or testing with different datasets.
+                    </p>
+
+                    <div class="guide-tip">
+                        <i class="bi bi-lightbulb-fill text-warning"></i>
+                        <span>Run at least one experiment per detection config to have meaningful comparison data for your thesis.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== API Reference ========== -->
+        <div class="tab-pane fade" id="tab-api" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="guide-section-title">
+                        <i class="bi bi-braces"></i> REST API Reference
+                    </div>
+                    <p>
+                        The application exposes <strong>~50 REST endpoints</strong> across ingestion, detection,
+                        evaluation, explanation, knowledge base, model training, data management, system,
+                        and LLM provider domains. Maintaining a hand-written list reliably is impractical
+                        — keep <strong>Swagger UI as the single source of truth</strong>:
+                    </p>
+                    <p>
+                        <a href="/swagger-ui/index.html" target="_blank" rel="noopener"
+                           class="btn btn-primary btn-sm">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Open Swagger UI
+                        </a>
+                        <a href="/v3/api-docs" target="_blank" rel="noopener"
+                           class="btn btn-outline-secondary btn-sm ms-2">
+                            <i class="bi bi-filetype-json me-1"></i>Raw OpenAPI JSON
+                        </a>
+                        <span class="text-muted small ms-3">Both require the app to be running.</span>
+                    </p>
+
+                    <div class="guide-tip">
+                        <i class="bi bi-lightbulb-fill text-warning"></i>
+                        <span>Swagger UI lets you call every endpoint interactively from the browser — no curl needed. Click any endpoint, "Try it out", fill in parameters, click "Execute".</span>
+                    </div>
+
+                    <div class="guide-subtitle">Most useful endpoints for thesis workflows</div>
+                    <p>
+                        These are the curated few you'll touch most often. The full list (with payloads,
+                        responses, and example values) lives in Swagger.
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table guide-api-table">
+                            <thead>
+                                <tr>
+                                    <th class="api-method-col">Method</th>
+                                    <th>Endpoint</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="3" class="table-secondary"><strong>Pipeline</strong></td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/ingestion/paysim/path</code></td><td>Import a PaySim CSV from a server-side file path (preferred for &gt;500&nbsp;MB datasets)</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/ingestion/features/compute</code></td><td>Compute features for all unprocessed transactions</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/ingestion/finalize-train-test-split?ratio=0.80</code></td><td>Carve the newest 20% of rows into the held-out test set</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/models/train/async</code></td><td>Train RF + XGBoost in the background; poll status</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/knowledge/seed</code></td><td>Seed the fraud-pattern knowledge base into pgvector (RAG retrieval store)</td></tr>
+
+                                <tr><td colspan="3" class="table-secondary"><strong>Evaluation</strong></td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/evaluation/run</code></td><td>Run a single experiment for one config (async — poll status)</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/evaluation/compare</code></td><td>Run all 5 configs back-to-back (async)</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/evaluation/kfold</code></td><td>k-fold cross-validation for one config (sync, returns k+1 rows)</td></tr>
+                                <tr><td><span class="guide-method-post">POST</span></td><td><code>/api/v1/evaluation/benchmark</code></td><td>Full thesis evaluation table — k-fold × all configs (sync, long-running)</td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/api/v1/evaluation/results/{experimentName}</code></td><td>Fetch every row for a named experiment</td></tr>
+
+                                <tr><td colspan="3" class="table-secondary"><strong>Export &amp; reporting</strong></td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/api/v1/export/experiments?experimentName=…</code></td><td>CSV export of experiment results</td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/api/v1/export/experiments/{name}/markdown</code></td><td>Self-contained Markdown report (paste into thesis)</td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/api/v1/export/experiments/{name}/bundle</code></td><td>Thesis-appendix ZIP: Markdown + 4 CSVs + reproducibility JSON</td></tr>
+
+                                <tr><td colspan="3" class="table-secondary"><strong>Data management (irreversible)</strong></td></tr>
+                                <tr><td><span class="guide-method-delete">DELETE</span></td><td><code>/api/v1/data/transactions</code></td><td>Wipe everything: explanations → alerts → features → transactions</td></tr>
+                                <tr><td><span class="guide-method-delete">DELETE</span></td><td><code>/api/v1/data/alerts</code></td><td>Wipe explanations + alerts (keep transactions and features)</td></tr>
+                                <tr><td><span class="guide-method-delete">DELETE</span></td><td><code>/api/v1/evaluation/results</code></td><td>Delete every experiment-result row</td></tr>
+                                <tr><td><span class="guide-method-delete">DELETE</span></td><td><code>/api/v1/evaluation/results/by-name/{name}</code></td><td>Delete every fold + summary row for one named experiment</td></tr>
+
+                                <tr><td colspan="3" class="table-secondary"><strong>Monitoring</strong></td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/actuator/health</code></td><td>Liveness + readiness probe</td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/actuator/prometheus</code></td><td>Prometheus scrape (FinGuard custom metrics included)</td></tr>
+                                <tr><td><span class="guide-method-get">GET</span></td><td><code>/actuator/caches</code></td><td>Caffeine cache stats (hit/miss ratios)</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="guide-info mt-3">
+                        <i class="bi bi-info-circle-fill prereq-icon--primary"></i>
+                        <span>
+                            Endpoints that change data (POST, PUT, DELETE) are tagged in Swagger with their
+                            method colour. Sync endpoints return the result body; async endpoints return
+                            <code>202 Accepted</code> with a <code>jobId</code> — poll the matching
+                            <code>/status/{jobId}</code> endpoint for progress. The
+                            <a href="/evaluation">Evaluation</a> page does this polling automatically.
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

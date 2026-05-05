@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Dashboard')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1><i class="bi bi-speedometer2 me-2"></i>Dashboard</h1>
+            <p>System overview &amp; fraud-detection analytics</p>
+        </div>
+        <span class="text-muted" style="font-size:0.8rem"
+              th:text="'Last updated: ' + ${#temporals.format(#temporals.createNow(), 'yyyy-MM-dd HH:mm')}"></span>
+    </div>
+
+    <!-- ========== Onboarding banner (shown only when DB is empty) ========== -->
+    <div class="onboard-banner" th:if="${overview.totalTransactions == 0}">
+        <div class="onboard-banner__icon"><i class="bi bi-stars"></i></div>
+        <div class="flex-grow-1">
+            <h5 class="onboard-banner__title">Welcome to FinGuard</h5>
+            <p class="onboard-banner__body">
+                This is an empty installation — import a dataset to start seeing fraud-detection
+                analytics. The shortest path to a working dashboard is these three steps:
+            </p>
+            <div class="onboard-steps">
+                <a class="onboard-step" th:href="@{/ingestion}">
+                    <span class="onboard-step__num">1</span>
+                    <i class="bi bi-upload"></i> Ingest a PaySim CSV
+                </a>
+                <a class="onboard-step" th:href="@{/models}">
+                    <span class="onboard-step__num">2</span>
+                    <i class="bi bi-cpu"></i> Train ML models
+                </a>
+                <a class="onboard-step" th:href="@{/detection}">
+                    <span class="onboard-step__num">3</span>
+                    <i class="bi bi-search"></i> Run detection
+                </a>
+                <a class="onboard-step" th:href="@{/evaluation}">
+                    <span class="onboard-step__num">4</span>
+                    <i class="bi bi-graph-up"></i> Run evaluation
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Pipeline Stage Timings ==========
+         Hidden until at least one stage has fired. The wrapper div
+         is HTMX-polled every 30 s so the table refreshes automatically
+         during long-running benchmark jobs without a full page reload.
+         All values are in-memory Micrometer Timer aggregates — they reset
+         when the JVM restarts. -->
+    <div th:if="${timings != null}"
+         class="card mb-4"
+         hx-get="/dashboard/timings-fragment"
+         hx-trigger="every 30s"
+         hx-swap="outerHTML">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="bi bi-stopwatch me-2"></i>Pipeline Stage Timings
+                <i class="bi bi-question-circle info-hint"
+                   data-bs-toggle="tooltip"
+                   title="Wall-clock time per pipeline stage since the last app start. Auto-refreshes every 30s."></i>
+            </h5>
+            <span class="badge bg-secondary"
+                  th:text="'Eval total: ' + ${#numbers.formatInteger(timings.evaluationTotalMs() / 1000, 1, 'COMMA')} + 's'">Eval total: 0s</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <!-- ── Ingestion stages ─────────────────────── -->
+                <div class="col-lg-4">
+                    <h6 class="text-muted mb-2">
+                        <i class="bi bi-upload me-1"></i>Ingestion
+                    </h6>
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr><th>Stage</th><th class="text-end">Runs</th><th class="text-end">Total</th><th class="text-end">Avg</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr th:each="row : ${timings.ingestion()}">
+                                <td th:text="${row.stage()}">Importing</td>
+                                <td class="text-end" th:text="${row.count()}">0</td>
+                                <td class="text-end"
+                                    th:text="${row.totalMs() == 0 ? '—' : (#numbers.formatInteger(row.totalMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                                <td class="text-end"
+                                    th:text="${row.avgMs() == 0 ? '—' : (#numbers.formatInteger(row.avgMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ── ML training stages ───────────────────── -->
+                <div class="col-lg-4">
+                    <h6 class="text-muted mb-2">
+                        <i class="bi bi-cpu me-1"></i>ML Training
+                    </h6>
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr><th>Model</th><th class="text-end">Runs</th><th class="text-end">Total</th><th class="text-end">Avg</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr th:each="row : ${timings.training()}">
+                                <td th:text="${row.stage()}">RF</td>
+                                <td class="text-end" th:text="${row.count()}">0</td>
+                                <td class="text-end"
+                                    th:text="${row.totalMs() == 0 ? '—' : (#numbers.formatInteger(row.totalMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                                <td class="text-end"
+                                    th:text="${row.avgMs() == 0 ? '—' : (#numbers.formatInteger(row.avgMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ── Evaluation per config ────────────────── -->
+                <div class="col-lg-4">
+                    <h6 class="text-muted mb-2">
+                        <i class="bi bi-graph-up me-1"></i>Evaluation
+                    </h6>
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr><th>Config</th><th class="text-end">Detect</th><th class="text-end">LLM</th><th class="text-end">CAKR</th><th class="text-end">Total</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr th:each="row : ${timings.evaluation()}">
+                                <td><span class="badge bg-light text-dark" th:text="${row.config()}">RULES_ONLY</span></td>
+                                <td class="text-end"
+                                    th:text="${row.detectionMs() == null ? '—' : (#numbers.formatInteger(row.detectionMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                                <td class="text-end"
+                                    th:text="${row.explanationMs() == null ? '—' : (#numbers.formatInteger(row.explanationMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                                <td class="text-end"
+                                    th:text="${row.cakrMs() == null ? '—' : (#numbers.formatInteger(row.cakrMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                                <td class="text-end fw-bold"
+                                    th:text="${row.totalMs() == null ? '—' : (#numbers.formatInteger(row.totalMs() / 1000, 1, 'COMMA') + 's')}">—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+                <i class="bi bi-info-circle me-1"></i>
+                "—" means the stage hasn't run yet in this JVM session.
+                Counters reset on app restart. Full histograms at
+                <a href="/actuator/prometheus" class="text-decoration-none" target="_blank">/actuator/prometheus</a>.
+            </p>
+        </div>
+    </div>
+
+    <!-- ========== Stat Cards ========== -->
+    <div class="row g-3 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card">
+                <div class="stat-icon primary"><i class="bi bi-arrow-left-right"></i></div>
+                <div>
+                    <div class="stat-value"
+                         th:text="${#numbers.formatInteger(overview.totalTransactions, 1, 'COMMA')}">0</div>
+                    <div class="stat-label">
+                        Total Transactions
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Every ingested transaction across every dataset source. Includes both legitimate and fraudulent rows."></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card">
+                <div class="stat-icon danger"><i class="bi bi-exclamation-triangle"></i></div>
+                <div>
+                    <div class="stat-value"
+                         th:text="${#numbers.formatInteger(overview.totalAlerts, 1, 'COMMA')}">0</div>
+                    <div class="stat-label">
+                        Alerts Generated
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="An alert is a transaction flagged by a detection pipeline run. The same transaction can have multiple alerts if evaluated under different detection configs."></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card">
+                <div class="stat-icon warning"><i class="bi bi-shield-exclamation"></i></div>
+                <div>
+                    <div class="stat-value" th:text="${overview.fraudRatePercent + '%'}">0%</div>
+                    <div class="stat-label">
+                        Fraud Rate
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Share of ingested transactions labelled fraud (ground truth). PaySim has ~0.13%, IBM AML has ~1–3%. A high rate here usually means the dataset is synthetic or filtered."></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="stat-card">
+                <div class="stat-icon success"><i class="bi bi-chat-left-text"></i></div>
+                <div>
+                    <div class="stat-value"
+                         th:text="${#numbers.formatInteger(overview.totalExplanations, 1, 'COMMA')}">0</div>
+                    <div class="stat-label">
+                        LLM Explanations
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Natural-language explanations generated by the LLM for flagged transactions. Only produced by configs that include an LLM (ML+LLM Direct, ML+LLM+RAG, Full System)."></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Removed: "Alerts by Status" / "Alerts by Detection Config" / "Transaction Types"
+         mini-charts. They showed raw counts without context (all alerts start as NEW, PaySim
+         type distribution is known in advance, config alert counts don't imply quality), which
+         made them noise rather than signal. The tiles above already surface total counts; the
+         System Activity Trend chart below shows time-series, and the Experiments table shows
+         the metrics that actually defend the thesis (precision/recall/F1/CAKR per config). -->
+
+    <!-- ========== Detection + Explanation Quality ========== -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-search me-2"></i>Detection Analytics
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Summary of what detection has found so far across all configs."></i>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <div class="metric-tile metric-tile--danger">
+                                <div class="metric-tile__value"
+                                     th:text="${#numbers.formatInteger(detection.totalAnomalies, 1, 'COMMA')}">0</div>
+                                <div class="metric-tile__label">
+                                    Anomalies Found
+                                    <i class="bi bi-question-circle info-hint"
+                                       data-bs-toggle="tooltip"
+                                       title="Count of alerts where is_anomaly = true across every detection config. A single fraud can be flagged multiple times (once per config)."></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="metric-tile metric-tile--primary">
+                                <div class="metric-tile__value"
+                                     th:text="${detection.avgMlRiskScore != null} ? ${#numbers.formatDecimal(detection.avgMlRiskScore, 1, 3)} : 'N/A'">N/A</div>
+                                <div class="metric-tile__label">
+                                    Avg ML Risk Score
+                                    <i class="bi bi-question-circle info-hint"
+                                       data-bs-toggle="tooltip"
+                                       title="Mean fraud probability (0–1) output by the Random Forest + XGBoost ensemble across all ML-scored alerts. ≥ 0.5 crosses the default alerting threshold."></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section-label">
+                        <i class="bi bi-database"></i>
+                        <span>Dataset Breakdown</span>
+                        <span class="section-label__hint">— totals per data source</span>
+                    </div>
+                    <table class="table table-sm mb-0">
+                        <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th class="text-end">Transactions</th>
+                            <th class="text-end">Fraud</th>
+                            <th class="text-end">Rate</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr th:each="ds : ${datasets}">
+                            <td th:text="${ds.datasetSource}">PaySim</td>
+                            <td class="text-end"
+                                th:text="${#numbers.formatInteger(ds.totalTransactions, 1, 'COMMA')}">0</td>
+                            <td class="text-end" style="color:var(--fg-danger)"
+                                th:text="${#numbers.formatInteger(ds.fraudTransactions, 1, 'COMMA')}">0</td>
+                            <td class="text-end">
+                                <span class="badge"
+                                      th:classappend="${ds.fraudRatePercent > 5} ? 'bg-danger' : (${ds.fraudRatePercent > 1} ? 'bg-warning text-dark' : 'bg-secondary')"
+                                      th:text="${ds.fraudRatePercent + '%'}">0%</span>
+                            </td>
+                        </tr>
+                        <tr th:if="${datasets.isEmpty()}">
+                            <td colspan="4">
+                                <div class="empty-state py-2">
+                                    <div class="empty-state__hint">No datasets imported yet.</div>
+                                </div>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-award me-2"></i>LLM Explanation Quality
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Quality of natural-language explanations generated by the LLM, scored using the CAKR framework (see below)."></i>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-4">
+                            <div class="metric-tile metric-tile--sm metric-tile--success">
+                                <div class="metric-tile__value"
+                                     th:text="${explQuality.avgConfidenceScore != null} ? ${#numbers.formatDecimal(explQuality.avgConfidenceScore, 1, 2)} : 'N/A'">N/A</div>
+                                <div class="metric-tile__label">
+                                    Avg Confidence
+                                    <i class="bi bi-question-circle info-hint"
+                                       data-bs-toggle="tooltip"
+                                       title="Mean of the confidence score (0–1) the LLM reports for its own explanations. Not independent truth — just the model's self-certainty."></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="metric-tile metric-tile--sm metric-tile--warning">
+                                <div class="metric-tile__value"
+                                     th:text="${explQuality.hallucinationRatePercent + '%'}">0%</div>
+                                <div class="metric-tile__label">
+                                    Hallucination Rate
+                                    <i class="bi bi-question-circle info-hint"
+                                       data-bs-toggle="tooltip"
+                                       title="Fraction of explanations where the HallucinationValidator flagged at least one factual error (wrong amount, invented account ID, etc.). Lower is better."></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="metric-tile metric-tile--sm metric-tile--info">
+                                <div class="metric-tile__value"
+                                     th:text="${explQuality.avgLatencyMs != null} ? ${#numbers.formatDecimal(explQuality.avgLatencyMs / 1000.0, 1, 1) + 's'} : 'N/A'">N/A</div>
+                                <div class="metric-tile__label">
+                                    Avg Latency
+                                    <i class="bi bi-question-circle info-hint"
+                                       data-bs-toggle="tooltip"
+                                       title="Mean wall-clock time per LLM explanation, including retrieval. RAG adds ~0.5–2s vs. Direct depending on vector-store load."></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section-label">
+                        <i class="bi bi-bar-chart-steps"></i>
+                        <span>CAKR Quality Dimensions</span>
+                        <span class="section-label__hint">— scale 1–5, higher is better</span>
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="CAKR = Completeness, Actionability, Knowledge, Regulatory. A four-dimension rubric scored 1–5 by an evaluator LLM (ideally a stronger judge than the generator). The average here is the mean across evaluated explanations."></i>
+                    </div>
+                    <div class="row g-2" th:if="${!cakrEntries.isEmpty()}">
+                        <div class="col-6" th:each="entry : ${cakrEntries}">
+                            <div class="d-flex justify-content-between mb-1" style="font-size:0.82rem">
+                                <span th:text="${entry.key}" style="color:var(--fg-text)">Dimension</span>
+                                <span class="fw-bold"
+                                      th:text="${entry.value != null} ? ${#numbers.formatDecimal(entry.value, 1, 1)} : 'N/A'"
+                                      th:style="${entry.value != null && entry.value >= 4} ? 'color:var(--fg-success)' :
+                                                 (${entry.value != null && entry.value >= 3} ? 'color:var(--fg-warning)' : 'color:var(--fg-muted)')">N/A</span>
+                            </div>
+                            <div class="cakr-bar mb-1">
+                                <div class="cakr-bar-fill"
+                                     th:style="${entry.value != null} ? 'width:' + ${entry.value * 20} + '%' : 'width:0%'"
+                                     style="transition:width 1s ease"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div th:if="${cakrEntries.isEmpty()}" class="empty-state">
+                        <div class="empty-state__icon"><i class="bi bi-bar-chart-steps"></i></div>
+                        <div class="empty-state__title">No CAKR data yet</div>
+                        <div class="empty-state__hint">Run an experiment with scoreExplanations=true to populate CAKR dimensions.</div>
+                        <a class="btn btn-sm btn-outline-primary empty-state__cta" th:href="@{/evaluation}">
+                            <i class="bi bi-graph-up me-1"></i>Run evaluation
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Trend chart + CAKR radar ========== -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>
+                        <i class="bi bi-activity me-2"></i>System Activity — Last 7 Days
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           data-bs-html="true"
+                           title="Aggregate table-row counts sampled every ~minute by the metric_snapshots job.&lt;br&gt;&lt;br&gt;
+<strong>Transactions</strong>: rows in the transactions table (the dataset).&lt;br&gt;
+<strong>Fraud</strong>: subset of transactions where is_fraud = true (ground truth positives).&lt;br&gt;
+<strong>Alerts</strong>: anomaly alerts produced by any detection config.&lt;br&gt;
+<strong>Explanations</strong>: LLM-generated explanations attached to alerts.&lt;br&gt;
+<strong>Patterns</strong>: fraud-pattern entries in the RAG knowledge base.&lt;br&gt;
+<strong>Experiments</strong>: rows in the experiment_results table — one row per (config × fold) plus one summary row per config per benchmark. Rises in clean steps after each evaluation run."></i>
+                    </span>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Time range">
+                        <button type="button" class="btn btn-outline-secondary active" data-range="1440">24h</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="4320">3d</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="10080">7d</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="noTrendData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-activity"></i></div>
+                        <div class="empty-state__title">No trend data yet</div>
+                        <div class="empty-state__hint">The metric snapshot job starts 30 seconds after app boot and collects one row per minute. Give it a minute.</div>
+                    </div>
+                    <canvas id="trendChart" style="max-height:280px"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-diagram-3 me-2"></i>CAKR Dimensions by Config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Radar chart: each axis is one CAKR dimension, each coloured polygon is one detection config. Shows where configs win/lose on explanation quality, not just the collapsed average."></i>
+                </div>
+                <div class="card-body">
+                    <div id="noCakrData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-diagram-3"></i></div>
+                        <div class="empty-state__title">No scored explanations yet</div>
+                        <div class="empty-state__hint">Run a benchmark with CAKR scoring enabled.</div>
+                    </div>
+                    <canvas id="cakrRadarChart" style="max-height:280px"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Experiments Table ========== -->
+    <div class="card" th:if="${!experiments.isEmpty()}">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <span>
+                <i class="bi bi-graph-up me-2"></i>Recent Experiment Results
+                <i class="bi bi-question-circle info-hint"
+                   data-bs-toggle="tooltip"
+                   title="Most recent rows from the experiment_results table. Colour coding: green = better, red = worse. Precision / Recall / F1 use ≥ 0.8 green, ≥ 0.6 amber, &lt; 0.6 red (higher is better). FPR inverts: ≤ 0.05 green, ≤ 0.10 amber, &gt; 0.10 red. CAKR: ≥ 4.0 green, ≥ 3.0 amber, &lt; 3.0 red on the 1-5 scale. F1 is bold as the headline metric."></i>
+            </span>
+            <a th:href="@{/evaluation}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-right me-1"></i>View All
+            </a>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                    <tr>
+                        <th>Experiment</th><th>Config</th><th>Precision</th><th>Recall</th>
+                        <th>F1 Score</th><th>FPR</th><th>CAKR</th><th>Alerts</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="exp : ${experiments}">
+                        <td th:text="${exp.experimentName}" style="font-weight:500">exp</td>
+                        <td><span class="badge bg-secondary" th:text="${exp.config}">CONFIG</span></td>
+                        <td>
+                            <span th:if="${exp.precision != null}"
+                                  th:text="${#numbers.formatDecimal(exp.precision, 1, 3)}"
+                                  th:style="${exp.precision >= 0.8} ? 'color:var(--fg-success)' : (${exp.precision >= 0.6} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">-</span>
+                            <span th:if="${exp.precision == null}" class="text-muted">-</span>
+                        </td>
+                        <td>
+                            <span th:if="${exp.recall != null}"
+                                  th:text="${#numbers.formatDecimal(exp.recall, 1, 3)}"
+                                  th:style="${exp.recall >= 0.8} ? 'color:var(--fg-success)' : (${exp.recall >= 0.6} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">-</span>
+                            <span th:if="${exp.recall == null}" class="text-muted">-</span>
+                        </td>
+                        <td>
+                            <span th:if="${exp.f1Score != null}"
+                                  class="fw-bold"
+                                  th:text="${#numbers.formatDecimal(exp.f1Score, 1, 3)}"
+                                  th:style="${exp.f1Score >= 0.8} ? 'color:var(--fg-success)' : (${exp.f1Score >= 0.6} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">-</span>
+                            <span th:if="${exp.f1Score == null}" class="text-muted">-</span>
+                        </td>
+                        <td>
+                            <!-- FPR: LOWER is better, so the scale is inverted vs precision/recall/F1. -->
+                            <span th:if="${exp.falsePositiveRate != null}"
+                                  th:text="${#numbers.formatDecimal(exp.falsePositiveRate, 1, 3)}"
+                                  th:style="${exp.falsePositiveRate <= 0.05} ? 'color:var(--fg-success)' : (${exp.falsePositiveRate <= 0.10} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">-</span>
+                            <span th:if="${exp.falsePositiveRate == null}" class="text-muted">-</span>
+                        </td>
+                        <td>
+                            <!-- CAKR is on a 1-5 scale, not a 0-1 scale — use different thresholds. -->
+                            <span th:if="${exp.avgCakrScore != null}"
+                                  th:text="${#numbers.formatDecimal(exp.avgCakrScore, 1, 2)}"
+                                  th:style="${exp.avgCakrScore >= 4.0} ? 'color:var(--fg-success)' : (${exp.avgCakrScore >= 3.0} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">-</span>
+                            <span th:if="${exp.avgCakrScore == null}" class="text-muted">-</span>
+                        </td>
+                        <td th:text="${#numbers.formatInteger(exp.totalAlerts, 1, 'COMMA')}">0</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:inline="javascript">
+    // Chart.js defaults + COLORS palette come from /js/finguard.js
+    // (loaded via fragments/layout.html :: scripts). Tooltip auto-init is also there.
+    const COLORS = FG.COLORS;
+
+    // ============================================================
+    // System Activity Trend — uses GET /api/v1/system/metrics/history
+    // ============================================================
+    let trendChartInstance = null;
+
+    async function loadTrend(minutes) {
+        try {
+            const res = await fetch(`/api/v1/system/metrics/history?minutes=${minutes}`);
+            if (!res.ok) throw new Error('bad status ' + res.status);
+            const points = await res.json();
+            renderTrend(points);
+        } catch (err) {
+            console.warn('Trend fetch failed:', err);
+            document.getElementById('noTrendData').style.display = 'flex';
+            document.getElementById('trendChart').style.display = 'none';
+        }
+    }
+
+    function renderTrend(points) {
+        if (!points || points.length < 2) {
+            document.getElementById('noTrendData').style.display = 'flex';
+            document.getElementById('trendChart').style.display = 'none';
+            return;
+        }
+        document.getElementById('noTrendData').style.display = 'none';
+        document.getElementById('trendChart').style.display = 'block';
+
+        // Sample to at most 150 points for readability
+        const stride = Math.max(1, Math.floor(points.length / 150));
+        const sampled = points.filter((_, i) => i % stride === 0);
+
+        const labels = sampled.map(p => {
+            const d = new Date(p.snapshotAt);
+            return d.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        });
+
+        const datasets = [
+            { label: 'Transactions', data: sampled.map(p => p.totalTransactions),  borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)',  fill: true, tension: 0.2, pointRadius: 0 },
+            { label: 'Alerts',       data: sampled.map(p => p.totalAlerts),        borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)',    fill: true, tension: 0.2, pointRadius: 0 },
+            { label: 'Explanations', data: sampled.map(p => p.totalExplanations),  borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)',    fill: true, tension: 0.2, pointRadius: 0 },
+            { label: 'Experiments',  data: sampled.map(p => p.totalExperiments),   borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)',   fill: true, tension: 0.2, pointRadius: 0 }
+        ];
+
+        if (trendChartInstance) trendChartInstance.destroy();
+        trendChartInstance = new Chart(document.getElementById('trendChart'), {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+                    tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${Number(ctx.raw).toLocaleString()}` } }
+                },
+                scales: {
+                    x: { ticks: { autoSkip: true, maxTicksLimit: 6, color: '#8b8fa3', font: { size: 10 } }, grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { color: '#8b8fa3', font: { size: 10 },
+                                   callback: v => Number(v).toLocaleString() },
+                         grid: { color: '#2d3140' } }
+                }
+            }
+        });
+    }
+
+    document.querySelectorAll('[data-range]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadTrend(parseInt(btn.dataset.range, 10));
+        });
+    });
+    loadTrend(1440);  // default: last 24h
+
+    // ============================================================
+    // CAKR Radar — uses GET /api/v1/evaluation/cakr-breakdown
+    // ============================================================
+    async function loadCakrRadar() {
+        try {
+            const res = await fetch('/api/v1/evaluation/cakr-breakdown');
+            if (!res.ok) throw new Error('bad status');
+            const rows = await res.json();
+            renderCakrRadar(rows);
+        } catch (err) {
+            console.warn('CAKR breakdown fetch failed:', err);
+            document.getElementById('noCakrData').style.display = 'flex';
+            document.getElementById('cakrRadarChart').style.display = 'none';
+        }
+    }
+
+    // num() comes from FG.num (shared in /js/finguard.js)
+    const num = FG.num;
+
+    function renderCakrRadar(rows) {
+        if (!rows || rows.length === 0) {
+            document.getElementById('noCakrData').style.display = 'flex';
+            document.getElementById('cakrRadarChart').style.display = 'none';
+            return;
+        }
+        document.getElementById('noCakrData').style.display = 'none';
+        document.getElementById('cakrRadarChart').style.display = 'block';
+
+        const dims = ['Completeness', 'Actionability', 'Correctness', 'Regulatory'];
+        const keys = ['completeness', 'actionability', 'correctness', 'regulatory'];
+        const datasets = rows.map((r, i) => ({
+            label: r.config,
+            data: keys.map(k => num(r[k]) ?? 0),
+            backgroundColor: COLORS[i % COLORS.length] + '30',
+            borderColor: COLORS[i % COLORS.length],
+            pointBackgroundColor: COLORS[i % COLORS.length],
+            borderWidth: 2
+        }));
+
+        new Chart(document.getElementById('cakrRadarChart'), {
+            type: 'radar',
+            data: { labels: dims, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+                    tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label} — ${ctx.label}: ${ctx.raw.toFixed(2)}` } }
+                },
+                scales: {
+                    r: {
+                        min: 0, max: 5,
+                        ticks: { stepSize: 1, color: '#8b8fa3', font: { size: 10 }, backdropColor: 'transparent' },
+                        angleLines: { color: '#2d3140' },
+                        grid: { color: '#2d3140' },
+                        pointLabels: { color: '#c4c8d8', font: { size: 11 } }
+                    }
+                }
+            }
+        });
+    }
+    loadCakrRadar();
+</script>
+</body>
+</html>

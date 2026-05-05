@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — LLM-Based Transaction Anomaly Detection')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+
+    <!-- ===== Hero ===== -->
+    <div class="landing-hero">
+        <div class="landing-hero-eyebrow">
+            <i class="bi bi-mortarboard me-1"></i> Master's Thesis · Nika Avalishvili
+        </div>
+        <h1 class="landing-hero-title">
+            <i class="bi bi-shield-check me-2"></i>FinGuard
+        </h1>
+        <p class="landing-hero-subtitle">
+            LLM-Based Transaction Anomaly Detection &amp; Explanation in Fintech
+        </p>
+        <p class="landing-hero-desc">
+            A research platform combining rule-based heuristics, machine learning (Random Forest + XGBoost),
+            and large language models with Retrieval-Augmented Generation to detect and explain
+            financial fraud across 5 experimental configurations.
+        </p>
+        <div class="landing-hero-actions">
+            <a href="/dashboard" class="btn btn-primary btn-lg px-4">
+                <i class="bi bi-speedometer2 me-2"></i>Open Dashboard
+            </a>
+            <a href="/guide" class="btn btn-outline-secondary btn-lg px-4">
+                <i class="bi bi-journal-bookmark me-2"></i>User Guide
+            </a>
+        </div>
+    </div>
+
+    <!-- ===== Live system status strip ===== -->
+    <div class="row g-3 mb-5" th:if="${hasData}">
+        <div class="col-xl col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--primary">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(overview.totalTransactions, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    <i class="bi bi-arrow-left-right me-1"></i>Transactions ingested
+                </div>
+            </div>
+        </div>
+        <div class="col-xl col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--danger">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(overview.totalAlerts, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    <i class="bi bi-exclamation-triangle me-1"></i>Alerts generated
+                </div>
+            </div>
+        </div>
+        <div class="col-xl col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--success">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(overview.totalExplanations, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    <i class="bi bi-chat-left-text me-1"></i>LLM explanations
+                </div>
+            </div>
+        </div>
+        <div class="col-xl col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--info">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(overview.totalExperiments, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    <i class="bi bi-graph-up me-1"></i>Experiments run
+                </div>
+            </div>
+        </div>
+        <div class="col-xl col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--warning"
+                 th:with="active=${activeProvider != null}">
+                <div class="metric-tile__value" style="font-size:1rem;line-height:1.25;text-align:center"
+                     th:text="${active ? activeProvider + ' · ' + activeModel : 'Not configured'}">—</div>
+                <div class="metric-tile__label">
+                    <i class="bi bi-robot me-1"></i>Active Judge / Generator LLM
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty state (first-time user) — points at the 4-step setup -->
+    <div class="onboard-banner" th:unless="${hasData}">
+        <div class="onboard-banner__icon"><i class="bi bi-stars"></i></div>
+        <div class="flex-grow-1">
+            <h5 class="onboard-banner__title">No data ingested yet</h5>
+            <p class="onboard-banner__body">
+                This is a fresh install. Follow these four steps to get from zero to a full
+                thesis evaluation table — each step links to the relevant page.
+            </p>
+            <div class="onboard-steps">
+                <a class="onboard-step" th:href="@{/ingestion}">
+                    <span class="onboard-step__num">1</span>
+                    <i class="bi bi-upload"></i> Ingest a PaySim CSV
+                </a>
+                <a class="onboard-step" th:href="@{/models}">
+                    <span class="onboard-step__num">2</span>
+                    <i class="bi bi-cpu"></i> Train ML models
+                </a>
+                <a class="onboard-step" th:href="@{/knowledge}">
+                    <span class="onboard-step__num">3</span>
+                    <i class="bi bi-book"></i> Seed knowledge base
+                </a>
+                <a class="onboard-step" th:href="@{/evaluation}">
+                    <span class="onboard-step__num">4</span>
+                    <i class="bi bi-graph-up"></i> Run full benchmark
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 5 Configurations ===== -->
+    <div class="mb-5">
+        <h2 class="landing-section-title">
+            <i class="bi bi-layers me-2"></i>5 Experimental Configurations
+        </h2>
+        <p class="landing-section-desc">
+            Each configuration represents a different stage of the detection pipeline, evaluated
+            independently using precision, recall, F1, AUC-ROC, and CAKR explanation quality scores.
+        </p>
+        <div class="row g-3">
+            <div class="col-lg col-md-6">
+                <div class="landing-config-card">
+                    <div class="landing-config-num">1</div>
+                    <div class="landing-config-badge" style="background:rgba(107,114,128,0.15);color:#9ca3af">
+                        <i class="bi bi-funnel me-1"></i>Rules Only
+                    </div>
+                    <p class="landing-config-desc">
+                        Threshold-based rules: large transaction, velocity, structuring, and new-receiver checks.
+                        No ML, no LLM. Fully deterministic and interpretable.
+                    </p>
+                </div>
+            </div>
+            <div class="col-lg col-md-6">
+                <div class="landing-config-card">
+                    <div class="landing-config-num">2</div>
+                    <div class="landing-config-badge" style="background:rgba(6,182,212,0.12);color:#22d3ee">
+                        <i class="bi bi-cpu me-1"></i>ML Only
+                    </div>
+                    <p class="landing-config-desc">
+                        Random Forest + XGBoost ensemble with SHAP feature importance.
+                        Requires model training. No natural language explanations.
+                    </p>
+                </div>
+            </div>
+            <div class="col-lg col-md-6">
+                <div class="landing-config-card">
+                    <div class="landing-config-num">3</div>
+                    <div class="landing-config-badge" style="background:rgba(245,158,11,0.12);color:#fbbf24">
+                        <i class="bi bi-chat-left-text me-1"></i>ML + LLM (Direct)
+                    </div>
+                    <p class="landing-config-desc">
+                        ML detection enriched with direct LLM-generated explanations.
+                        No retrieval context — LLM relies on its pre-training only.
+                    </p>
+                </div>
+            </div>
+            <div class="col-lg col-md-6">
+                <div class="landing-config-card">
+                    <div class="landing-config-num">4</div>
+                    <div class="landing-config-badge" style="background:rgba(139,92,246,0.12);color:#a78bfa">
+                        <i class="bi bi-database me-1"></i>ML + LLM + RAG
+                    </div>
+                    <p class="landing-config-desc">
+                        ML + RAG-augmented LLM explanations using a pgvector fraud pattern
+                        knowledge base. Grounded in domain-specific context.
+                    </p>
+                </div>
+            </div>
+            <div class="col-lg col-md-6">
+                <div class="landing-config-card landing-config-card--highlight">
+                    <div class="landing-config-num">5</div>
+                    <div class="landing-config-badge" style="background:rgba(34,197,94,0.12);color:#4ade80">
+                        <i class="bi bi-shield-check me-1"></i>Full System
+                    </div>
+                    <p class="landing-config-desc">
+                        Rules + ML + RAG + hallucination mitigation. The complete pipeline
+                        evaluated against all CAKR dimensions (Completeness, Actionability,
+                        Knowledge, Regulatory).
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Quick Navigation ===== -->
+    <div class="mb-5">
+        <h2 class="landing-section-title">
+            <i class="bi bi-grid me-2"></i>Navigate the System
+        </h2>
+        <div class="row g-3">
+            <div class="col-lg-4 col-md-6">
+                <a href="/dashboard" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#6366f1,#818cf8)">
+                        <i class="bi bi-speedometer2"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Dashboard</div>
+                        <div class="landing-nav-desc">System overview, charts, detection analytics, experiment results</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/ingestion" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#06b6d4,#22d3ee)">
+                        <i class="bi bi-upload"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Data Ingestion</div>
+                        <div class="landing-nav-desc">Import PaySim CSV datasets (upload or server path), compute ML features</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/models" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">
+                        <i class="bi bi-cpu"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">ML Models</div>
+                        <div class="landing-nav-desc">Train Random Forest and XGBoost models on ingested transaction data</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/detection" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">
+                        <i class="bi bi-search"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Run Detection</div>
+                        <div class="landing-nav-desc">Execute one of the 5 detection configurations on all transactions</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/alerts" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)">
+                        <i class="bi bi-exclamation-triangle"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Alerts</div>
+                        <div class="landing-nav-desc">Review generated alerts, filter by config or status, view details</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/explanations" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#22c55e,#4ade80)">
+                        <i class="bi bi-chat-left-text"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Explanations</div>
+                        <div class="landing-nav-desc">Browse LLM-generated explanations with CAKR quality metrics</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/evaluation" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#ec4899,#f472b6)">
+                        <i class="bi bi-graph-up"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Evaluation</div>
+                        <div class="landing-nav-desc">Run experiments, compare F1/AUC/CAKR across configurations</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/knowledge" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#0ea5e9,#38bdf8)">
+                        <i class="bi bi-book"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">Knowledge Base</div>
+                        <div class="landing-nav-desc">Manage fraud pattern entries used by the RAG pipeline</div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <a href="/guide" class="landing-nav-card text-decoration-none">
+                    <div class="landing-nav-icon" style="background:linear-gradient(135deg,#64748b,#94a3b8)">
+                        <i class="bi bi-journal-bookmark"></i>
+                    </div>
+                    <div>
+                        <div class="landing-nav-title">User Guide</div>
+                        <div class="landing-nav-desc">Step-by-step setup, API reference, architecture overview</div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Quick Start Steps ===== -->
+    <div class="mb-4">
+        <h2 class="landing-section-title">
+            <i class="bi bi-play-circle me-2"></i>Quick Start
+        </h2>
+        <div class="row g-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <ol class="landing-steps">
+                            <li>
+                                <strong>Start infrastructure</strong>
+                                <code class="landing-cmd">docker-compose up -d</code>
+                                <span class="text-muted">— starts PostgreSQL + pgvector + Ollama</span>
+                            </li>
+                            <li>
+                                <strong>Pull LLM models</strong> <span class="text-muted">(first time only)</span>
+                                <code class="landing-cmd">docker exec -it finguard-ollama ollama pull llama3.2 &amp;&amp; docker exec -it finguard-ollama ollama pull nomic-embed-text</code>
+                            </li>
+                            <li>
+                                <strong>Run the application</strong>
+                                <code class="landing-cmd">./mvnw spring-boot:run</code>
+                                <span class="text-muted">— app starts on <a href="http://localhost:8080">localhost:8080</a></span>
+                            </li>
+                            <li>
+                                <strong><a href="/ingestion">Import data</a></strong>
+                                <span class="text-muted">— upload a PaySim CSV or provide a server path</span>
+                            </li>
+                            <li>
+                                <strong><a href="/models">Train ML models</a></strong>
+                                <span class="text-muted">— required for ML-based configurations</span>
+                            </li>
+                            <li>
+                                <strong><a href="/knowledge">Seed knowledge base</a></strong>
+                                <span class="text-muted">— loads fraud patterns for the RAG pipeline</span>
+                            </li>
+                            <li>
+                                <strong><a href="/detection">Run detection</a></strong>
+                                <span class="text-muted">— choose a configuration and execute the pipeline</span>
+                            </li>
+                            <li>
+                                <strong><a href="/evaluation">Run evaluation</a></strong>
+                                <span class="text-muted">— compare configurations with precision/recall/F1/CAKR metrics</span>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

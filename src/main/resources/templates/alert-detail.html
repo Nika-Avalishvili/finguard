@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Alert Detail')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <a th:href="@{/alerts}" class="text-muted text-decoration-none mb-2 d-inline-block">
+            <i class="bi bi-arrow-left me-1"></i>Back to Alerts
+        </a>
+        <h1><i class="bi bi-exclamation-triangle me-2"></i>Alert #<span th:text="${alert.id}">1</span></h1>
+    </div>
+
+    <div class="row g-3">
+        <!-- Alert Info -->
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">Alert Information</div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        <tr>
+                            <td class="text-muted info-table-label">Status</td>
+                            <td>
+                                <span class="badge badge-status"
+                                      th:classappend="${alert.status.name() == 'NEW'} ? 'badge-new' :
+                                                      (${alert.status.name() == 'REVIEWED'} ? 'badge-reviewed' :
+                                                      (${alert.status.name() == 'CONFIRMED_FRAUD'} ? 'badge-confirmed' : 'badge-false-pos'))"
+                                      th:text="${alert.status.displayName}">New</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Detection Config</td>
+                            <td th:text="${alert.detectionConfig.displayName}">Rules Only</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Rule Triggered</td>
+                            <td th:text="${alert.ruleTriggered ?: 'N/A'}">N/A</td>
+                        </tr>
+                        <tr th:if="${alert.detectionConfig.name() != 'RULES_ONLY'}">
+                            <td class="text-muted">ML Risk Score</td>
+                            <td>
+                                <div th:if="${alert.mlRiskScore != null}" class="d-flex align-items-center gap-2">
+                                    <span class="fw-bold" th:text="${#numbers.formatDecimal(alert.mlRiskScore, 1, 4)}">0.0000</span>
+                                    <div class="risk-bar" style="width:120px">
+                                        <div class="risk-bar-fill"
+                                             th:classappend="${alert.mlRiskScore < 0.4} ? 'risk-low' : (${alert.mlRiskScore < 0.7} ? 'risk-medium' : 'risk-high')"
+                                             th:style="'width:' + ${alert.mlRiskScore * 100} + '%'"></div>
+                                    </div>
+                                </div>
+                                <span th:if="${alert.mlRiskScore == null}" class="text-muted fst-italic small">Pending — not yet scored</span>
+                            </td>
+                        </tr>
+                        <tr th:if="${alert.detectionConfig.name() != 'RULES_ONLY'}">
+                            <td class="text-muted">ML Model</td>
+                            <td>
+                                <span th:if="${alert.mlModelName != null}" th:text="${alert.mlModelName}">model</span>
+                                <span th:if="${alert.mlModelName == null}" class="text-muted fst-italic small">Pending — not yet scored</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Created</td>
+                            <td th:text="${#temporals.format(alert.createdAt, 'yyyy-MM-dd HH:mm:ss')}">2024-01-01</td>
+                        </tr>
+                    </table>
+
+                    <!-- Status Update -->
+                    <form th:action="@{/alerts/{id}/status(id=${alert.id})}" method="post" class="mt-3 d-flex gap-2">
+                        <select class="form-select form-select-sm w-auto" name="status">
+                            <option th:each="s : ${statuses}" th:value="${s}" th:text="${s.displayName}"
+                                    th:selected="${s == alert.status}">STATUS</option>
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-check2 me-1"></i>Update Status
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transaction Info -->
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">Transaction Details</div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        <tr>
+                            <td class="text-muted info-table-label">Transaction ID</td>
+                            <td th:text="${transaction.id}">1</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">External ID</td>
+                            <td><code th:text="${transaction.externalId}">ext-id</code></td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Type</td>
+                            <td th:text="${transaction.transactionType}">TRANSFER</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Amount</td>
+                            <td class="fw-bold" th:text="'$' + ${#numbers.formatDecimal(transaction.amount, 1, 2)}">$0.00</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Sender</td>
+                            <td><code th:text="${transaction.senderAccount}">sender</code></td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Receiver</td>
+                            <td><code th:text="${transaction.receiverAccount}">receiver</code></td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Ground Truth</td>
+                            <td>
+                                <span th:if="${transaction.isFraud}" class="badge badge-status badge-confirmed">FRAUD</span>
+                                <span th:unless="${transaction.isFraud}" class="badge badge-status badge-false-pos">LEGITIMATE</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Timestamp</td>
+                            <td th:text="${#temporals.format(transaction.timestamp, 'yyyy-MM-dd HH:mm:ss')}">2024-01-01</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Explanations -->
+    <div class="card mt-3" th:if="${!explanations.isEmpty()}">
+        <div class="card-header"><i class="bi bi-chat-left-text me-2"></i>Explanations</div>
+        <div class="card-body">
+            <div th:each="expl : ${explanations}" class="result-panel mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="badge bg-secondary" th:text="${expl.explanationType}">TYPE</span>
+                    <div class="d-flex gap-3 small">
+                        <span class="text-muted">Confidence:
+                            <span class="fw-bold"
+                                  th:if="${expl.confidenceScore != null}"
+                                  th:text="${#numbers.formatDecimal(expl.confidenceScore, 1, 2)}"
+                                  th:style="${expl.confidenceScore >= 0.8} ? 'color:var(--fg-success)' :
+                                             (${expl.confidenceScore >= 0.6} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">0.85</span>
+                            <span class="fw-bold text-muted" th:unless="${expl.confidenceScore != null}">N/A</span>
+                        </span>
+                        <span class="text-muted">Latency:
+                            <span class="fw-bold" th:text="${expl.latencyMs != null ? expl.latencyMs + 'ms' : 'N/A'}">150ms</span>
+                        </span>
+                        <span th:if="${expl.hallucinationFree != null}">
+                            <span th:if="${expl.hallucinationFree}" class="badge badge-status badge-false-pos">
+                                <i class="bi bi-check-circle me-1"></i>Clean
+                            </span>
+                            <!-- Label harmonised with Explanations page: "Flagged" (was "Hallucinated") -->
+                            <span th:unless="${expl.hallucinationFree}" class="badge badge-status badge-confirmed">
+                                <i class="bi bi-exclamation-triangle me-1"></i>Flagged
+                            </span>
+                        </span>
+                    </div>
+                </div>
+                <div th:if="${expl.riskSummary != null}" class="mb-2">
+                    <strong class="small">Risk Summary:</strong>
+                    <span th:text="${expl.riskSummary}">Summary</span>
+                </div>
+                <div class="explanation-text" th:text="${expl.explanationText}">Explanation text goes here</div>
+
+                <!-- CAKR Scores if present — colour-coded values consistent with Explanations/Evaluation pages -->
+                <div th:if="${expl.cakrCompleteness != null}" class="row g-2 mt-2">
+                    <div class="col-3">
+                        <div class="cakr-label-row">
+                            <span>Completeness</span>
+                            <span class="fw-bold"
+                                  th:text="${#numbers.formatDecimal(expl.cakrCompleteness, 1, 1)}"
+                                  th:style="${expl.cakrCompleteness >= 4} ? 'color:var(--fg-success)' :
+                                             (${expl.cakrCompleteness >= 2.5} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">0</span>
+                        </div>
+                        <div class="cakr-bar"><div class="cakr-bar-fill"
+                             th:style="'width:' + ${expl.cakrCompleteness * 20} + '%'"></div></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="cakr-label-row">
+                            <span>Correctness</span>
+                            <span class="fw-bold"
+                                  th:if="${expl.cakrCorrectness != null}"
+                                  th:text="${#numbers.formatDecimal(expl.cakrCorrectness, 1, 1)}"
+                                  th:style="${expl.cakrCorrectness >= 4} ? 'color:var(--fg-success)' :
+                                             (${expl.cakrCorrectness >= 2.5} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">0</span>
+                            <span th:unless="${expl.cakrCorrectness != null}" class="fw-bold text-muted">—</span>
+                        </div>
+                        <div class="cakr-bar"><div class="cakr-bar-fill"
+                             th:style="${expl.cakrCorrectness != null} ? 'width:' + ${expl.cakrCorrectness * 20} + '%' : 'width:0%'"></div></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="cakr-label-row">
+                            <span>Actionability</span>
+                            <span class="fw-bold"
+                                  th:if="${expl.cakrActionability != null}"
+                                  th:text="${#numbers.formatDecimal(expl.cakrActionability, 1, 1)}"
+                                  th:style="${expl.cakrActionability >= 4} ? 'color:var(--fg-success)' :
+                                             (${expl.cakrActionability >= 2.5} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">0</span>
+                            <span th:unless="${expl.cakrActionability != null}" class="fw-bold text-muted">—</span>
+                        </div>
+                        <div class="cakr-bar"><div class="cakr-bar-fill"
+                             th:style="${expl.cakrActionability != null} ? 'width:' + ${expl.cakrActionability * 20} + '%' : 'width:0%'"></div></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="cakr-label-row">
+                            <span>Regulatory</span>
+                            <span class="fw-bold"
+                                  th:if="${expl.cakrRegulatory != null}"
+                                  th:text="${#numbers.formatDecimal(expl.cakrRegulatory, 1, 1)}"
+                                  th:style="${expl.cakrRegulatory >= 4} ? 'color:var(--fg-success)' :
+                                             (${expl.cakrRegulatory >= 2.5} ? 'color:var(--fg-warning)' : 'color:var(--fg-danger)')">0</span>
+                            <span th:unless="${expl.cakrRegulatory != null}" class="fw-bold text-muted">—</span>
+                        </div>
+                        <div class="cakr-bar"><div class="cakr-bar-fill"
+                             th:style="${expl.cakrRegulatory != null} ? 'width:' + ${expl.cakrRegulatory * 20} + '%' : 'width:0%'"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card mt-3" th:if="${explanations.isEmpty()}">
+        <div class="card-body">
+            <div class="empty-state">
+                <div class="empty-state__icon"><i class="bi bi-chat-left-dots"></i></div>
+                <div class="empty-state__title">No explanations yet</div>
+                <div class="empty-state__hint">
+                    Generate a natural-language explanation for this alert using the active LLM.
+                    RAG augments the prompt with matching fraud patterns; Direct calls the LLM with no retrieval.
+                </div>
+                <div class="mt-3 d-flex justify-content-center gap-2">
+                    <button class="btn btn-primary btn-sm" onclick="generateExplanation('rag')">
+                        <i class="bi bi-stars me-1"></i>Generate (RAG)
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="generateExplanation('direct')">
+                        <i class="bi bi-chat-left-text me-1"></i>Generate (Direct)
+                    </button>
+                </div>
+                <div id="genStatus" class="mt-3" style="display:none"></div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:inline="javascript">
+    const alertId = /*[[${alert.id}]]*/ 0;
+
+    async function generateExplanation(mode) {
+        const statusDiv = document.getElementById('genStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Calling LLM... this may take a moment.';
+        document.querySelectorAll('[onclick^="generateExplanation"]').forEach(b => b.disabled = true);
+
+        try {
+            const res = await fetch(`/api/v1/explanations/generate/${mode}/${alertId}`, { method: 'POST' });
+            if (res.ok) {
+                statusDiv.innerHTML = '<i class="bi bi-check-circle text-success me-1"></i>Explanation generated. Reloading...';
+                setTimeout(() => location.reload(), 800);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                statusDiv.innerHTML = `<i class="bi bi-x-circle text-danger me-1"></i>${err.detail || err.message || 'Generation failed — is Ollama running?'}`;
+                document.querySelectorAll('[onclick^="generateExplanation"]').forEach(b => b.disabled = false);
+            }
+        } catch (e) {
+            statusDiv.innerHTML = `<i class="bi bi-x-circle text-danger me-1"></i>${e.message}`;
+            document.querySelectorAll('[onclick^="generateExplanation"]').forEach(b => b.disabled = false);
+        }
+    }
+</script>
+</body>
+</html>

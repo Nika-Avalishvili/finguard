@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Alerts')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1><i class="bi bi-exclamation-triangle me-2"></i>Alerts</h1>
+            <p>Review and manage detection alerts raised by the pipeline.</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary fs-6"
+                  th:text="${#numbers.formatInteger(page.totalElements, 1, 'COMMA') + ' matching'}">0 matching</span>
+            <button class="btn btn-sm btn-outline-danger" th:if="${page.totalElements > 0}"
+                    onclick="clearData('alerts', 'all alerts and their explanations', '/alerts')">
+                <i class="bi bi-trash3 me-1"></i>Clear all
+            </button>
+        </div>
+    </div>
+
+    <!-- ========== Stat strip ========== -->
+    <div class="row g-3 mb-3">
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--danger">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(totalAnomalies, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    Anomaly Alerts
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Total alerts flagged as anomalies across all detection configs. A single transaction may appear in multiple configs."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--primary">
+                <div class="metric-tile__value"
+                     th:text="${alertsByStatus.get('NEW') != null ? #numbers.formatInteger(alertsByStatus.get('NEW'), 1, 'COMMA') : '0'}">0</div>
+                <div class="metric-tile__label">
+                    New (untriaged)
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Alerts that a compliance analyst hasn't reviewed yet. First-class focus list."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--success">
+                <div class="metric-tile__value"
+                     th:text="${alertsByStatus.get('CONFIRMED_FRAUD') != null ? #numbers.formatInteger(alertsByStatus.get('CONFIRMED_FRAUD'), 1, 'COMMA') : '0'}">0</div>
+                <div class="metric-tile__label">
+                    Confirmed Fraud
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Alerts an analyst has manually confirmed as genuine fraud. Useful as a precision-numerator counterpart in post-hoc analysis."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--info">
+                <div class="metric-tile__value"
+                     th:text="${avgRiskScore != null ? #numbers.formatDecimal(avgRiskScore, 1, 3) : 'N/A'}">N/A</div>
+                <div class="metric-tile__label">
+                    Avg ML Risk
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Mean fraud probability (0–1) across every ML-scored alert. ≥0.5 means most alerts crossed the default alerting threshold."></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Filters ========== -->
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <form class="row g-2 align-items-end" th:action="@{/alerts}" method="get">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold mb-1" for="filterStatus">
+                        Status
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="NEW → REVIEWED → CONFIRMED_FRAUD or FALSE_POSITIVE. Triage flow for a compliance analyst."></i>
+                    </label>
+                    <select class="form-select form-select-sm" name="status" id="filterStatus">
+                        <option value="">All statuses</option>
+                        <option th:each="s : ${statuses}" th:value="${s}" th:text="${s.displayName}"
+                                th:selected="${s.name() == selectedStatus}">STATUS</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold mb-1" for="filterConfig">
+                        Detection Config
+                        <i class="bi bi-question-circle info-hint"
+                           data-bs-toggle="tooltip"
+                           title="Which of the 5 detection configurations produced this alert."></i>
+                    </label>
+                    <select class="form-select form-select-sm" name="config" id="filterConfig">
+                        <option value="">All configs</option>
+                        <option th:each="c : ${configs}" th:value="${c}" th:text="${c.displayName}"
+                                th:selected="${c.name() == selectedConfig}">CONFIG</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-funnel me-1"></i>Apply
+                    </button>
+                    <a th:href="@{/alerts}" class="btn btn-outline-secondary btn-sm"
+                       th:if="${selectedStatus != null || selectedConfig != null}">
+                        <i class="bi bi-x-circle me-1"></i>Clear filters
+                    </a>
+                </div>
+            </form>
+
+            <!-- Active filter chips — instantly visible summary of what's filtered -->
+            <div class="mt-2 d-flex gap-2 flex-wrap"
+                 th:if="${selectedStatus != null || selectedConfig != null}">
+                <span class="text-muted small">Active:</span>
+                <span th:if="${selectedStatus != null}" class="badge bg-dark border border-secondary">
+                    status = <strong th:text="${selectedStatus}">NEW</strong>
+                </span>
+                <span th:if="${selectedConfig != null}" class="badge bg-dark border border-secondary">
+                    config = <strong th:text="${selectedConfig}">ML_ONLY</strong>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Table ========== -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Transaction</th>
+                        <th>
+                            Config
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Which detection config raised this alert."></i>
+                        </th>
+                        <th>
+                            Rule
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Rule(s) that fired for rule-based configs. Empty for ML-only alerts."></i>
+                        </th>
+                        <th>
+                            ML Risk
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Fraud probability from the Random Forest + XGBoost ensemble. Bar colour: green &lt; 0.4, amber 0.4–0.7, red ≥ 0.7."></i>
+                        </th>
+                        <th>
+                            Anomaly
+                            <i class="bi bi-question-circle info-hint"
+                               data-bs-toggle="tooltip"
+                               title="Whether the alert crossed the alerting threshold for its config."></i>
+                        </th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="alert : ${page.content}">
+                        <td th:text="${alert.id}">1</td>
+                        <td>
+                            <a th:href="@{/alerts/{id}(id=${alert.id})}" class="text-decoration-none"
+                               th:text="'Tx #' + ${alert.transaction.id}">Tx #1</a>
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary" th:text="${alert.detectionConfig.displayName}">CONFIG</span>
+                        </td>
+                        <td th:text="${alert.ruleTriggered != null ? #strings.abbreviate(alert.ruleTriggered, 30) : '—'}"
+                            th:title="${alert.ruleTriggered}">—</td>
+                        <td>
+                            <div th:if="${alert.mlRiskScore != null}" class="d-flex align-items-center gap-2">
+                                <span th:text="${#numbers.formatDecimal(alert.mlRiskScore, 1, 2)}"
+                                      th:style="${alert.mlRiskScore >= 0.7} ? 'color:var(--fg-danger);font-weight:600' :
+                                                 (${alert.mlRiskScore >= 0.4} ? 'color:var(--fg-warning);font-weight:600' : 'color:var(--fg-success)')">0.00</span>
+                                <div class="risk-bar">
+                                    <div class="risk-bar-fill"
+                                         th:classappend="${alert.mlRiskScore < 0.4} ? 'risk-low' : (${alert.mlRiskScore < 0.7} ? 'risk-medium' : 'risk-high')"
+                                         th:style="'width:' + ${alert.mlRiskScore * 100} + '%'"></div>
+                                </div>
+                            </div>
+                            <span th:if="${alert.mlRiskScore == null}" class="text-muted">—</span>
+                        </td>
+                        <td>
+                            <span th:if="${alert.isAnomaly}" class="badge badge-status badge-anomaly">Anomaly</span>
+                            <span th:unless="${alert.isAnomaly}" class="text-muted">—</span>
+                        </td>
+                        <td>
+                            <span class="badge badge-status"
+                                  th:classappend="${alert.status.name() == 'NEW'} ? 'badge-new' :
+                                                  (${alert.status.name() == 'REVIEWED'} ? 'badge-reviewed' :
+                                                  (${alert.status.name() == 'CONFIRMED_FRAUD'} ? 'badge-confirmed' : 'badge-false-pos'))"
+                                  th:text="${alert.status.displayName}">New</span>
+                        </td>
+                        <td th:text="${#temporals.format(alert.createdAt, 'yyyy-MM-dd HH:mm')}"
+                            class="text-muted small">2024-01-01</td>
+                        <td>
+                            <a th:href="@{/alerts/{id}(id=${alert.id})}"
+                               class="btn btn-outline-secondary btn-sm" title="Open alert detail">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    <tr th:if="${page.content.isEmpty()}">
+                        <td colspan="9">
+                            <div class="empty-state">
+                                <div class="empty-state__icon"><i class="bi bi-bell-slash"></i></div>
+                                <div class="empty-state__title"
+                                     th:text="${selectedStatus != null || selectedConfig != null}
+                                         ? 'No alerts match your filters'
+                                         : 'No alerts yet'">No alerts yet</div>
+                                <div class="empty-state__hint"
+                                     th:text="${selectedStatus != null || selectedConfig != null}
+                                         ? 'Try clearing the filters to see all alerts.'
+                                         : 'Run the detection pipeline to raise alerts against your dataset.'">
+                                    Run the detection pipeline.
+                                </div>
+                                <a class="btn btn-sm btn-outline-primary empty-state__cta"
+                                   th:if="${selectedStatus != null || selectedConfig != null}"
+                                   th:href="@{/alerts}">
+                                    <i class="bi bi-x-circle me-1"></i>Clear filters
+                                </a>
+                                <a class="btn btn-sm btn-outline-primary empty-state__cta"
+                                   th:unless="${selectedStatus != null || selectedConfig != null}"
+                                   th:href="@{/detection}">
+                                    <i class="bi bi-play-fill me-1"></i>Go to Detection
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pagination — filter params preserved -->
+    <nav th:if="${page.totalPages > 1}" class="mt-3">
+        <ul class="pagination pagination-sm justify-content-center">
+            <li class="page-item" th:classappend="${page.isFirst()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="@{/alerts(page=${page.number - 1}, status=${selectedStatus}, config=${selectedConfig})}">Prev</a>
+            </li>
+            <li class="page-item" th:each="i : ${#numbers.sequence(0, page.totalPages - 1)}"
+                th:if="${page.totalPages <= 10 || (i < 3 || i > page.totalPages - 4 || (i >= page.number - 1 && i <= page.number + 1))}"
+                th:classappend="${i == page.number} ? 'active'">
+                <a class="page-link"
+                   th:href="@{/alerts(page=${i}, status=${selectedStatus}, config=${selectedConfig})}"
+                   th:text="${i + 1}">1</a>
+            </li>
+            <li class="page-item" th:classappend="${page.isLast()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="@{/alerts(page=${page.number + 1}, status=${selectedStatus}, config=${selectedConfig})}">Next</a>
+            </li>
+        </ul>
+    </nav>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // Tooltips auto-init via /js/finguard.js (FG.initTooltips).
+
+    async function clearData(entity, label, redirectTo) {
+        if (!confirm('Delete ' + label + '?\n\nThis is irreversible.')) return;
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const res = await fetch('/api/v1/data/' + entity, { method: 'DELETE' });
+            if (res.ok) { window.location.href = redirectTo; }
+            else {
+                alert('Delete failed: ' + res.status);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Clear all';
+            }
+        } catch(e) { alert(e.message); btn.disabled = false; }
+    }
+</script>
+</body>
+</html>

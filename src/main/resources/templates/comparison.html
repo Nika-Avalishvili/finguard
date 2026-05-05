@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Experiment Comparison')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header d-flex justify-content-between align-items-start">
+        <div>
+            <a th:href="@{/evaluation}" class="text-muted text-decoration-none small d-inline-block mb-1">
+                <i class="bi bi-arrow-left me-1"></i>Back to Evaluation
+            </a>
+            <h1>
+                <i class="bi bi-bar-chart-line me-2"></i>
+                <span th:text="${experimentName}">experiment-name</span>
+            </h1>
+            <p class="mb-0">
+                Side-by-side comparison of every detection config in this experiment run.
+                Pairs detection metrics with CAKR quality &amp; latency so you can see the cost-benefit picture at a glance.
+            </p>
+        </div>
+        <div class="btn-group btn-group-sm" role="group">
+            <a th:href="@{/api/v1/export/experiments(experimentName=${experimentName})}"
+               class="btn btn-outline-secondary"
+               data-bs-toggle="tooltip"
+               title="Raw results table only — one row per (config, fold) for offline analysis.">
+                <i class="bi bi-filetype-csv me-1"></i>CSV
+            </a>
+            <a th:href="@{/api/v1/export/experiments/{name}/markdown(name=${experimentName})}"
+               class="btn btn-outline-secondary"
+               data-bs-toggle="tooltip"
+               title="Self-contained Markdown report — paste straight into the thesis evaluation chapter. Includes metrics table, winners summary, full reproducibility snapshot, and cross-experiment analytics.">
+                <i class="bi bi-file-earmark-text me-1"></i>Markdown
+            </a>
+            <a th:href="@{/api/v1/export/experiments/{name}/bundle(name=${experimentName})}"
+               class="btn btn-outline-primary"
+               data-bs-toggle="tooltip"
+               title="Thesis-appendix ZIP: Markdown report + 4 CSVs + reproducibility JSON. Everything an examiner needs to verify this run.">
+                <i class="bi bi-file-earmark-zip me-1"></i>Thesis Bundle
+            </a>
+        </div>
+    </div>
+
+    <!-- ========== Stat strip ========== -->
+    <div class="row g-3 mb-3">
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--primary">
+                <div class="metric-tile__value" th:text="${displayRows.size()}">0</div>
+                <div class="metric-tile__label">
+                    Configurations compared
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Number of distinct detection configurations in this experiment. Each config is one polygon in the radar chart below."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--info">
+                <div class="metric-tile__value" th:text="${foldCount}">0</div>
+                <div class="metric-tile__label">
+                    Per-fold result rows
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Total k-fold rows across all configs. Zero means this was a single-split run (no cross-validation)."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--success">
+                <div class="metric-tile__value" id="bestF1Config">—</div>
+                <div class="metric-tile__label">
+                    Best F1 config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Configuration with the highest F1 score — the usual headline metric balancing precision and recall."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="metric-tile metric-tile--warning">
+                <div class="metric-tile__value" id="bestCakrConfig">—</div>
+                <div class="metric-tile__label">
+                    Best CAKR config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Configuration with the highest average CAKR score. Usually only relevant for LLM-using configs."></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Research-context banner ========== -->
+    <div class="alert alert-info border-start border-info border-4 d-flex align-items-start gap-3 mb-3" role="alert">
+        <i class="bi bi-lightbulb-fill flex-shrink-0" style="font-size:1.1rem;color:#0dcaf0"></i>
+        <div class="small flex-grow-1">
+            <strong>How to read this comparison.</strong>
+            The three middle configs (<code>ML_ONLY</code>, <code>ML_LLM_DIRECT</code>, <code>ML_LLM_RAG</code>)
+            use the <em>same ML detector</em> — identical precision / recall / F1 / FPR / alert counts are
+            <strong>expected</strong>, not a bug. The LLM layer only changes <em>how</em> alerts are explained.
+            <br>
+            → Compare <strong>detection metrics</strong>: <code>RULES_ONLY</code> vs <code>ML_ONLY</code> vs <code>FULL_SYSTEM</code>.
+            → Compare <strong>explanation quality</strong> (CAKR, hallucination rate, latency): the three LLM configs against each other.
+        </div>
+    </div>
+
+    <!-- ========== Pivoted metrics table (metrics × configs) ========== -->
+    <!-- This is the canonical "who wins what" view. Each row is a metric, each
+         column is a config. Best cell per row carries a 🏆 badge. The old
+         row-per-config layout made comparison hard — you had to visually scan
+         down one column across 5+ rows. -->
+    <div class="card mb-3">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <span><i class="bi bi-table me-2"></i>Metrics Comparison (pivoted)
+                <i class="bi bi-question-circle info-hint" data-bs-toggle="tooltip"
+                   title="Metrics as rows, configs as columns. 🏆 marks the winning config per metric (accounting for whether higher or lower is better). Hover any cell for the raw value + delta vs the baseline (first column)."></i>
+            </span>
+            <small class="text-muted">
+                Colour:
+                <span class="metric-good px-2">good</span>
+                <span class="metric-medium px-2">ok</span>
+                <span class="metric-bad px-2">poor</span>
+                ·
+                <span class="badge bg-warning text-dark"><i class="bi bi-trophy-fill me-1"></i>winner</span>
+            </small>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 comparison-pivot">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="min-width:180px">Metric</th>
+                            <th th:each="r : ${displayRows}" class="text-center">
+                                <span class="badge"
+                                      th:classappend="${r.config.name() == 'FULL_SYSTEM'} ? 'bg-success' :
+                                                      (${r.config.name() == 'ML_LLM_RAG'} ? 'bg-primary' :
+                                                      (${r.config.name() == 'ML_LLM_DIRECT'} ? 'bg-info text-dark' :
+                                                      (${r.config.name() == 'ML_ONLY'} ? 'bg-warning text-dark' : 'bg-secondary')))"
+                                      th:text="${r.config}">CONFIG</span>
+                                <div class="small text-muted mt-1">
+                                    <span th:if="${r.fold != null}" th:text="${'fold ' + r.fold}">fold</span>
+                                    <span th:unless="${r.fold != null}"
+                                          title="Mean across folds — the thesis-quotable number">summary</span>
+                                </div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="pivotBody">
+                        <!-- Rows are injected by JS so winner 🏆 + delta can be
+                             computed once with all values in scope. -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Charts row ========== -->
+    <div class="row g-3 mb-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-bar-chart me-2"></i>F1 Score by Config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="F1 is the headline detection-quality metric — harmonic mean of precision and recall. Higher is better."></i>
+                </div>
+                <div class="card-body">
+                    <div id="noF1Data" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-bar-chart"></i></div>
+                        <div class="empty-state__title">No F1 scores yet</div>
+                        <div class="empty-state__hint">All result rows have null F1 — run detection first.</div>
+                    </div>
+                    <canvas id="f1Chart" style="max-height:280px"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-diagram-3 me-2"></i>CAKR Dimensions by Config
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Each polygon is one detection config. Axes are the four CAKR dimensions (1–5). Shows where each config wins/loses on explanation quality."></i>
+                </div>
+                <div class="card-body">
+                    <div id="noCakrData" class="empty-state" style="display:none">
+                        <div class="empty-state__icon"><i class="bi bi-diagram-3"></i></div>
+                        <div class="empty-state__title">No CAKR data for this experiment</div>
+                        <div class="empty-state__hint">
+                            Re-run with <code>scoreExplanations=true</code> to get CAKR dimension breakdowns.
+                        </div>
+                    </div>
+                    <canvas id="cakrChart" style="max-height:280px"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<style>
+.metric-good    { color: #16a34a; font-weight: 700; background: rgba(22,163,74,0.08);  border-radius: 4px; padding: 2px 8px; }
+.metric-medium  { color: #d97706; font-weight: 700; background: rgba(217,119,6,0.08);  border-radius: 4px; padding: 2px 8px; }
+.metric-bad     { color: #dc2626; font-weight: 700; background: rgba(220,38,38,0.08);  border-radius: 4px; padding: 2px 8px; }
+
+/* Pivoted comparison styling — make the metric column sticky-feeling + emphasise F1 row */
+.comparison-pivot .pivot-metric-label { font-weight: 600; color: var(--fg-text); background: rgba(255,255,255,0.02); }
+.comparison-pivot .pivot-cell         { vertical-align: middle; }
+.comparison-pivot .pivot-headline-row { background: rgba(217,119,6,0.05); border-top: 2px solid rgba(217,119,6,0.25); border-bottom: 2px solid rgba(217,119,6,0.25); }
+.comparison-pivot .pivot-headline-row td,
+.comparison-pivot .pivot-headline-row th { font-size: 1.02rem; }
+</style>
+<script th:inline="javascript">
+(function () {
+    // Row data injected from the controller — each entry is one displayRow.
+    // Fields used by the charts: config, f1Score, cakrCompleteness (via
+    // row.cakr* keys). The per-dimension CAKR values aren't stored on
+    // ExperimentResult (only the aggregate avgCakrScore), so the radar
+    // chart overlays are built from the dashboard's /cakr-breakdown API
+    // which aggregates per-config across all explanations.
+    const rows = /*[[${displayRows}]]*/ [];
+
+    // ── Build F1 bar data from injected rows ─────────────────────
+    const f1Labels = [];
+    const f1Values = [];
+    rows.forEach(r => {
+        if (r.f1Score != null) {
+            f1Labels.push(r.config + (r.fold != null ? ' f' + r.fold : ''));
+            f1Values.push(r.f1Score);
+        }
+    });
+
+    function pickF1Winner() {
+        let best = null;
+        rows.forEach(r => {
+            if (r.f1Score != null && (best === null || r.f1Score > best.f1Score)) best = r;
+        });
+        return best;
+    }
+    function pickCakrWinner() {
+        let best = null;
+        rows.forEach(r => {
+            if (r.avgCakrScore != null && (best === null || r.avgCakrScore > best.avgCakrScore)) best = r;
+        });
+        return best;
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Pivoted comparison table — metrics as rows, configs as columns.
+    // Each metric declares a formatter + "higher-is-better" flag so the
+    // single builder can color and pick winners consistently.
+    // ────────────────────────────────────────────────────────────────────
+    const METRICS = [
+        { key: 'precisionScore',     label: 'Precision',    tip: 'Of flagged transactions, fraction actually fraud. Higher = fewer false alarms.', higherIsBetter: true,  fmt: v => v.toFixed(3),                   good: v => v >= 0.8, mid: v => v >= 0.5 },
+        { key: 'recallScore',        label: 'Recall',       tip: 'Of actual fraud, fraction caught. Higher = fewer misses.',                      higherIsBetter: true,  fmt: v => v.toFixed(3),                   good: v => v >= 0.8, mid: v => v >= 0.5 },
+        { key: 'f1Score',            label: 'F1 Score',     tip: 'Harmonic mean of precision + recall. The headline detection number.',         higherIsBetter: true,  fmt: v => v.toFixed(3),                   good: v => v >= 0.8, mid: v => v >= 0.5, headline: true },
+        { key: 'falsePositiveRate',  label: 'FPR',          tip: 'False positive rate — fraction of legit transactions wrongly flagged. Lower = less alert fatigue.', higherIsBetter: false, fmt: v => v.toFixed(3),  good: v => v <= 0.1, mid: v => v <= 0.3 },
+        { key: 'avgCakrScore',       label: 'CAKR (1–5)',   tip: 'LLM-as-judge quality score: Completeness, Actionability, Correctness, Regulatory. Only populated for LLM configs with scoreExplanations=true.', higherIsBetter: true, fmt: v => v.toFixed(2), good: v => v >= 4.0, mid: v => v >= 2.5 },
+        { key: 'hallucinationRate',  label: 'Hallucinations', tip: 'Share of explanations flagged as factually incorrect. Lower = more trustworthy. Only populated for LLM configs.', higherIsBetter: false, fmt: v => (v * 100).toFixed(1) + '%', good: v => v <= 0.1, mid: v => v <= 0.3 },
+        { key: 'avgLatencyMs',       label: 'Avg latency',  tip: 'Average explanation latency. Lower = cheaper. Only populated for LLM configs.', higherIsBetter: false, fmt: v => v.toFixed(0) + 'ms',             good: v => v <= 2000, mid: v => v <= 8000 },
+        { key: 'totalAlerts',        label: 'Alerts',       tip: 'Number of anomaly alerts on the test set (detection side). Not a quality metric — shown for reference.', higherIsBetter: null,  fmt: v => Number(v).toLocaleString(),      good: () => false, mid: () => false },
+    ];
+
+    function pickWinnerIndex(metric) {
+        if (metric.higherIsBetter === null) return -1;  // no winner concept
+        let bestIdx = -1;
+        let bestVal = null;
+        rows.forEach((r, i) => {
+            const v = r[metric.key];
+            if (v == null) return;
+            if (bestVal === null ||
+                (metric.higherIsBetter && v > bestVal) ||
+                (!metric.higherIsBetter && v < bestVal)) {
+                bestIdx = i;
+                bestVal = v;
+            }
+        });
+        return bestIdx;
+    }
+
+    function renderPivotTable() {
+        const tbody = document.getElementById('pivotBody');
+        if (!tbody) return;
+        const frag = document.createDocumentFragment();
+
+        METRICS.forEach(metric => {
+            const tr = document.createElement('tr');
+            if (metric.headline) tr.classList.add('pivot-headline-row');
+
+            const th = document.createElement('th');
+            th.className = 'pivot-metric-label';
+            th.innerHTML = `<span>${FG.escapeHtml(metric.label)}</span>` +
+                           ` <i class="bi bi-info-circle small text-muted" title="${FG.escapeHtml(metric.tip)}" data-bs-toggle="tooltip"></i>`;
+            tr.appendChild(th);
+
+            const winnerIdx = pickWinnerIndex(metric);
+            const baselineVal = rows[0] != null ? rows[0][metric.key] : null;
+
+            rows.forEach((r, i) => {
+                const td = document.createElement('td');
+                td.className = 'text-center pivot-cell';
+                const v = r[metric.key];
+                if (v == null) {
+                    td.innerHTML = '<span class="text-muted">—</span>';
+                } else {
+                    const colorClass = metric.good(v) ? 'metric-good'
+                                      : metric.mid(v)  ? 'metric-medium'
+                                      : metric.higherIsBetter === null ? '' : 'metric-bad';
+                    const winnerBadge = (i === winnerIdx)
+                        ? ' <i class="bi bi-trophy-fill text-warning" style="font-size:0.85em" title="Best in this row"></i>'
+                        : '';
+                    let deltaText = '';
+                    if (i > 0 && baselineVal != null && metric.higherIsBetter !== null) {
+                        const d = v - baselineVal;
+                        if (Math.abs(d) >= 1e-6) {
+                            // positive delta in the "good" direction = green, else red
+                            const goodDir = (d > 0) === metric.higherIsBetter;
+                            const sign = d > 0 ? '+' : '';
+                            const color = goodDir ? '#16a34a' : '#dc2626';
+                            deltaText = ` <span style="color:${color};font-size:0.72em">(${sign}${metric.fmt(d).replace(/[^\-0-9.]/g, '')})</span>`;
+                        }
+                    }
+                    td.innerHTML = `<span class="${colorClass}">${FG.escapeHtml(metric.fmt(v))}</span>${winnerBadge}${deltaText}`;
+                }
+                tr.appendChild(td);
+            });
+
+            frag.appendChild(tr);
+        });
+
+        tbody.innerHTML = '';
+        tbody.appendChild(frag);
+        FG.initTooltips();
+    }
+
+    renderPivotTable();
+
+    const f1Winner   = pickF1Winner();
+    const cakrWinner = pickCakrWinner();
+    if (f1Winner) {
+        document.getElementById('bestF1Config').textContent = f1Winner.config;
+        document.getElementById('bestF1Config').title =
+            f1Winner.config + ' · F1 = ' + f1Winner.f1Score.toFixed(3);
+    }
+    if (cakrWinner) {
+        document.getElementById('bestCakrConfig').textContent = cakrWinner.config;
+        document.getElementById('bestCakrConfig').title =
+            cakrWinner.config + ' · CAKR = ' + cakrWinner.avgCakrScore.toFixed(2);
+    }
+
+    // ── F1 bar chart ─────────────────────────────────────────────
+    if (f1Values.length === 0) {
+        document.getElementById('noF1Data').style.display = 'flex';
+        document.getElementById('f1Chart').style.display = 'none';
+    } else {
+        new Chart(document.getElementById('f1Chart'), {
+            type: 'bar',
+            data: {
+                labels: f1Labels,
+                datasets: [{
+                    label: 'F1 Score',
+                    data: f1Values,
+                    backgroundColor: f1Labels.map((_, i) => FG.COLORS[i % FG.COLORS.length]),
+                    borderRadius: 6,
+                    borderSkipped: false
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: {
+                        label: ctx => ' F1 = ' + ctx.raw.toFixed(3)
+                    } }
+                },
+                scales: {
+                    y: { beginAtZero: true, max: 1, ticks: { stepSize: 0.2 },
+                         grid: { color: '#2d3140' } },
+                    x: { ticks: { color: '#c4c8d8', font: { size: 10 } },
+                         grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // ── CAKR radar — built from /cakr-breakdown (aggregate per config) ─
+    // This shows cross-run averages, not experiment-specific values,
+    // because ExperimentResult stores only the collapsed avgCakrScore.
+    // It's still the most useful "where does each config win on quality"
+    // view for thesis comparisons.
+    async function loadCakrRadar() {
+        try {
+            const data = await FG.fetchJson('/api/v1/evaluation/cakr-breakdown');
+            renderCakrRadar(data);
+        } catch (err) {
+            document.getElementById('noCakrData').style.display = 'flex';
+            document.getElementById('cakrChart').style.display = 'none';
+        }
+    }
+
+    function renderCakrRadar(cakrRows) {
+        if (!cakrRows || cakrRows.length === 0) {
+            document.getElementById('noCakrData').style.display = 'flex';
+            document.getElementById('cakrChart').style.display = 'none';
+            return;
+        }
+        // Only keep configs that also appear in this experiment.
+        const myConfigs = new Set(rows.map(r => r.config));
+        const filtered = cakrRows.filter(r => myConfigs.has(r.config));
+        if (filtered.length === 0) {
+            document.getElementById('noCakrData').style.display = 'flex';
+            document.getElementById('cakrChart').style.display = 'none';
+            return;
+        }
+
+        const dims = ['Completeness', 'Actionability', 'Correctness', 'Regulatory'];
+        const keys = ['completeness', 'actionability', 'correctness', 'regulatory'];
+        const datasets = filtered.map((r, i) => ({
+            label: r.config,
+            data: keys.map(k => FG.num(r[k]) ?? 0),
+            backgroundColor: FG.COLORS[i % FG.COLORS.length] + '30',
+            borderColor: FG.COLORS[i % FG.COLORS.length],
+            pointBackgroundColor: FG.COLORS[i % FG.COLORS.length],
+            borderWidth: 2
+        }));
+
+        new Chart(document.getElementById('cakrChart'), {
+            type: 'radar',
+            data: { labels: dims, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } },
+                    tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label} — ${ctx.label}: ${ctx.raw.toFixed(2)}` } }
+                },
+                scales: {
+                    r: {
+                        min: 0, max: 5,
+                        ticks: { stepSize: 1, backdropColor: 'transparent' },
+                        angleLines: { color: '#2d3140' },
+                        grid: { color: '#2d3140' },
+                        pointLabels: { color: '#c4c8d8', font: { size: 11 } }
+                    }
+                }
+            }
+        });
+    }
+    loadCakrRadar();
+})();
+</script>
+</body>
+</html>

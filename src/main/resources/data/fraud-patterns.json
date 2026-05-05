@@ -1,0 +1,92 @@
+[
+  {
+    "patternType": "STRUCTURING",
+    "title": "Transaction Structuring (Smurfing)",
+    "description": "Structuring involves deliberately breaking a large financial transaction into smaller amounts, typically below regulatory reporting thresholds such as the $10,000 CTR threshold under the Bank Secrecy Act. The goal is to avoid triggering automatic reports to FinCEN. Indicators include multiple transactions in rapid succession from the same account, round or just-below-threshold amounts, and consistent patterns over several days. Structuring is illegal under 31 U.S.C. § 5324 regardless of whether the underlying funds are lawful.",
+    "indicators": ["Multiple transactions just below $10,000", "Round amounts (e.g., $9,000, $9,500)", "Same sender account within 24-48 hours", "High transaction velocity with consistent amounts", "Cash deposits split across multiple branches"],
+    "regulatoryReference": "31 U.S.C. § 5324; BSA/AML CTR threshold ($10,000); FinCEN Advisory FIN-2014-A007",
+    "exampleScenario": "An account holder makes five separate $9,500 cash deposits across three branches within two days, totaling $47,500. Each transaction individually falls below the $10,000 CTR threshold, but the pattern clearly indicates an intent to evade reporting requirements.",
+    "source": "FinCEN/FATF Typology"
+  },
+  {
+    "patternType": "MONEY_MULE",
+    "title": "Money Mule Account Activity",
+    "description": "A money mule is an individual who transfers illegally obtained funds on behalf of others, often unknowingly recruited through fake job offers or romance scams. The mule's account receives large inflows from multiple sources and rapidly distributes funds to other accounts, often internationally. Key indicators include a sudden increase in transaction volume, funds received from unknown sources followed by near-immediate outgoing transfers, and a high ratio of incoming to outgoing transactions with minimal account balance retention.",
+    "indicators": ["Sudden spike in account activity", "Large inflows from multiple unrelated sources", "Near-immediate redistribution of received funds", "Minimal balance retention between transfers", "New account with high-value activity", "International wire transfers shortly after domestic deposits"],
+    "regulatoryReference": "FATF Typology Report on Money Laundering; EU 6th Anti-Money Laundering Directive (6AMLD); FinCEN SAR Filing Guidance",
+    "exampleScenario": "A recently opened account receives three wire transfers totaling $150,000 from different corporate accounts within one week. Within hours of each receipt, the account holder initiates international wire transfers to accounts in high-risk jurisdictions, retaining less than 2% of the transferred amount.",
+    "source": "FATF Typology"
+  },
+  {
+    "patternType": "ACCOUNT_TAKEOVER",
+    "title": "Account Takeover (ATO) Fraud",
+    "description": "Account takeover occurs when a fraudster gains unauthorized access to a legitimate customer's account, typically through phishing, credential stuffing, or social engineering. The attacker then initiates unauthorized transactions, changes account settings, or extracts funds. Key indicators include transactions from unusual geographic locations, changes to contact information followed by high-value transfers, transactions at unusual times for the account holder, and sudden deviations from established spending patterns.",
+    "indicators": ["Transactions from new geographic location or device", "Contact information changes followed by large transfers", "Transactions at unusual hours for the account holder", "Password reset followed by immediate high-value transfer", "Spending patterns drastically different from historical baseline", "Multiple failed login attempts preceding successful access"],
+    "regulatoryReference": "Regulation E (12 CFR § 1005); FFIEC Guidance on Authentication; PSD2 Strong Customer Authentication (EU)",
+    "exampleScenario": "A customer's account, which typically processes domestic payments of $200-$500, suddenly initiates a $45,000 wire transfer to an overseas account at 3:00 AM local time. The account email was changed 30 minutes before the transfer, and there were 12 failed login attempts from a foreign IP address in the preceding hour.",
+    "source": "FFIEC/Industry Pattern"
+  },
+  {
+    "patternType": "LAYERING",
+    "title": "Layering (Money Laundering Stage 2)",
+    "description": "Layering is the second stage of money laundering, designed to distance illicit funds from their criminal source through complex layers of financial transactions. The goal is to obscure the audit trail. Techniques include rapid movement of funds between multiple accounts (often across jurisdictions), conversion between different financial instruments, use of shell companies, and round-tripping through trade-based transactions. The complexity and speed of transactions are the primary hallmarks.",
+    "indicators": ["Rapid fund movement through multiple accounts", "Cross-border transfers to/from high-risk jurisdictions", "Circular transactions (funds returning to origin through intermediaries)", "Use of multiple shell company accounts", "Frequent currency conversions", "Transactions with no clear economic purpose"],
+    "regulatoryReference": "FATF 40 Recommendations; 4th EU Anti-Money Laundering Directive; BSA/AML Examination Manual",
+    "exampleScenario": "Funds totaling $500,000 move through seven different accounts across four countries within 48 hours. The money passes through two shell companies registered in offshore jurisdictions, undergoes two currency conversions, and ultimately arrives in an investment account bearing no obvious connection to the original sender.",
+    "source": "FATF Typology"
+  },
+  {
+    "patternType": "BUST_OUT",
+    "title": "Bust-Out Fraud (Credit/Account Fraud)",
+    "description": "Bust-out fraud involves building up trust and credit over time before maximizing credit lines and absconding with the funds. In the context of transaction monitoring, bust-out patterns manifest as accounts that maintain normal, low-risk activity for months, gradually increase transaction sizes and frequency, then suddenly execute a burst of high-value transactions before the account goes dormant or is abandoned. This pattern exploits the trust signals that normal account history creates.",
+    "indicators": ["Gradual increase in transaction amounts over weeks/months", "Sudden spike to maximum transaction capacity", "Account goes dormant immediately after high-value burst", "Balance drawn to zero or negative", "Historical activity used to establish credibility", "Multiple payment methods utilized during bust-out phase"],
+    "regulatoryReference": "OCC Bulletin 2019-37; FinCEN Mortgage Fraud SAR Activity Review",
+    "exampleScenario": "An account shows 8 months of regular $500-$2,000 monthly transfers. Over two weeks, transaction amounts escalate to $15,000, then $40,000. In a 72-hour window, the account initiates $280,000 in outgoing transfers, depleting all available funds. The account holder becomes unreachable and the account is abandoned.",
+    "source": "OCC/Industry Pattern"
+  },
+  {
+    "patternType": "TRADE_BASED",
+    "title": "Trade-Based Money Laundering (TBML)",
+    "description": "Trade-based money laundering exploits international trade transactions to move value across borders. Methods include over-invoicing or under-invoicing goods, multiple invoicing for the same shipment, and phantom shipments where no goods actually move. In transaction monitoring, TBML manifests as payments that don't match typical trade patterns: amounts inconsistent with the type or volume of goods, payments to/from counterparties in high-risk jurisdictions with no clear business relationship, and discrepancies between declared trade values and market prices.",
+    "indicators": ["Payment amounts inconsistent with goods/services described", "Transactions with counterparties in known TBML jurisdictions", "Repeated payments for same invoice or shipment", "Significant over/under-pricing compared to market rates", "Payments routed through intermediary countries", "No corresponding trade documentation"],
+    "regulatoryReference": "FATF Report on Trade-Based Money Laundering (2006); FinCEN Advisory FIN-2010-A001; Wolfsberg Group Trade Finance Principles",
+    "exampleScenario": "A company makes monthly payments of $200,000 to a supplier in a high-risk jurisdiction for 'electronic components.' Market analysis shows the declared unit prices are 400% above market rates. The receiving company has no web presence and was incorporated 3 months before the first transaction.",
+    "source": "FATF/Wolfsberg"
+  },
+  {
+    "patternType": "RAPID_MOVEMENT",
+    "title": "Rapid Fund Movement (Pass-Through Activity)",
+    "description": "Rapid fund movement describes accounts that function primarily as pass-through conduits, receiving and disbursing funds within a very short timeframe. Unlike money mule activity, this pattern may involve legitimate business accounts being misused, or accounts specifically created for fund transit. The hallmark is the minimal dwell time of funds in the account — typically less than 24 hours between receipt and disbursement — with the account maintaining a near-zero balance between transaction cycles.",
+    "indicators": ["Funds disbursed within hours of receipt", "Near-zero balance between transaction cycles", "High transaction volume relative to account age", "Incoming and outgoing amounts nearly identical (minus small fees)", "Regular pattern of receive-then-send behavior", "No legitimate business explanation for pass-through activity"],
+    "regulatoryReference": "FinCEN SAR Narrative Guidance; FATF Risk-Based Approach Guidance; BSA/AML Examination Manual Section on Suspicious Activity",
+    "exampleScenario": "An account receives a $75,000 wire transfer at 9:15 AM and initiates three outgoing transfers totaling $74,500 by 11:30 AM the same day. This pattern repeats 4 times within 10 days, with funds never remaining in the account for more than 3 hours.",
+    "source": "FinCEN/Industry Pattern"
+  },
+  {
+    "patternType": "CASH_INTENSIVE",
+    "title": "Cash-Intensive Business Anomalies",
+    "description": "Cash-intensive businesses (restaurants, retail, car washes, parking garages) can be exploited to commingle illicit cash with legitimate revenue. Suspicious patterns include cash deposits that significantly exceed expected revenue for the business type and size, deposits that remain constant regardless of seasonal variations, and cash deposit patterns that don't match business operating hours or customer traffic patterns. The key is the deviation between expected and actual cash flows.",
+    "indicators": ["Cash deposits exceeding industry norms for business size", "Consistent deposit amounts regardless of seasonal trends", "Cash deposits at times inconsistent with business hours", "Revenue reported significantly higher than peer businesses", "No corresponding increase in business expenses with increased revenue", "Round deposit amounts suggesting manual calculation rather than actual cash receipts"],
+    "regulatoryReference": "FinCEN Geographic Targeting Orders; BSA/AML Examination Manual; IRS Cash-Intensive Business Audit Techniques Guide",
+    "exampleScenario": "A small restaurant with 30 seats reports weekly cash deposits of $45,000 — three times the industry average for a restaurant its size. Deposits occur every Monday and Thursday at exactly the same amount, regardless of holidays or seasonal variations, and the business reports no corresponding increase in supply purchases.",
+    "source": "FinCEN/IRS Typology"
+  },
+  {
+    "patternType": "INSIDER_FRAUD",
+    "title": "Insider Threat / Employee Fraud",
+    "description": "Insider fraud occurs when employees or authorized personnel abuse their access to financial systems for personal gain or to facilitate criminal activity. In transaction monitoring, insider threats manifest as transactions initiated outside normal business processes, unauthorized account modifications, transactions that bypass normal approval chains, and patterns suggesting an employee is testing system controls before executing larger fraudulent transactions. Insider fraud often exploits gaps in segregation of duties.",
+    "indicators": ["Transactions initiated outside normal business hours by employees", "Account modifications not following standard procedures", "Small test transactions preceding larger unauthorized transfers", "Employee accounts with unusual transaction patterns", "Transactions bypassing normal approval workflows", "Access to accounts outside employee's normal responsibilities"],
+    "regulatoryReference": "FFIEC IT Examination Handbook; Sarbanes-Oxley Act Section 302/404; COSO Internal Control Framework",
+    "exampleScenario": "A bank employee modifies the daily transfer limit on a dormant corporate account at 11:45 PM, then initiates a $200,000 transfer to a personal account at 11:58 PM. Three days earlier, the same employee made two $50 test transfers from the same corporate account to verify the transfer mechanism.",
+    "source": "FFIEC/ACFE Typology"
+  },
+  {
+    "patternType": "UNUSUAL_GEOGRAPHY",
+    "title": "Unusual Geographic Transaction Patterns",
+    "description": "Geographic anomalies in transaction patterns can indicate fraud, money laundering, or sanctions evasion. Suspicious geographic patterns include transactions involving countries under sanctions or with weak AML controls, sudden geographic shifts in transaction destinations, transactions that transit through multiple jurisdictions without clear business justification, and activity patterns inconsistent with the customer's known geographic footprint. The risk assessment should consider both the jurisdictions involved and the pattern of geographic movement.",
+    "indicators": ["Transactions to/from FATF high-risk jurisdictions", "Sudden change in transaction geography", "Funds routed through multiple countries (jurisdiction hopping)", "Transactions inconsistent with customer's declared business geography", "Wire transfers to newly added foreign beneficiaries", "IP address/device location inconsistent with transaction origin"],
+    "regulatoryReference": "OFAC Sanctions Programs; FATF High-Risk Jurisdictions List; EU High-Risk Third Country List; FinCEN Section 311 Special Measures",
+    "exampleScenario": "A domestic retail business account that has never processed international transactions suddenly initiates wire transfers to accounts in three different high-risk jurisdictions within one week, totaling $180,000. The declared purpose is 'consulting fees,' but the business has no known international operations.",
+    "source": "OFAC/FATF"
+  }
+]

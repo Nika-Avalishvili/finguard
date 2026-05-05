@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Data Ingestion')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="bi bi-upload me-2"></i>Data Ingestion</h1>
+        <p>Import transaction datasets and compute ML features for the fraud detection pipeline.</p>
+    </div>
+
+    <!-- ========== Stats strip — current data state ========== -->
+    <div class="row g-3 mb-3">
+        <div class="col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--primary">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(totalTransactions, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    Transactions imported
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Rows in the transactions table right now — across all datasets (PaySim, IBM AML, etc.)."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="metric-tile"
+                 th:classappend="${featuresCount > 0 and featuresCount >= totalTransactions} ? 'metric-tile--success' :
+                                 (${featuresCount > 0} ? 'metric-tile--warning' : 'metric-tile--danger')">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(featuresCount, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    Features computed
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Rows in transaction_features. Must equal the transactions count before running ML-based detection."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="metric-tile"
+                 th:classappend="${pendingFeatures == 0 and totalTransactions > 0} ? 'metric-tile--success' :
+                                 (${pendingFeatures > 0} ? 'metric-tile--warning' : 'metric-tile--primary')">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(pendingFeatures, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    <span th:if="${pendingFeatures > 0}">Pending feature compute</span>
+                    <span th:unless="${pendingFeatures > 0}">Ready for detection</span>
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Transactions that don't yet have features. Click 'Compute Features' below to process them — safe to re-run."></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+
+        <!-- ===== Upload CSV ===== -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-cloud-upload text-primary"></i>
+                    Upload CSV
+                </div>
+                <div class="card-body d-flex flex-column">
+                    <p class="text-muted small mb-3">
+                        Upload a PaySim CSV file from your computer. Best for files under 200&nbsp;MB.
+                        For larger files, use the server path option.
+                    </p>
+                    <form id="uploadForm" enctype="multipart/form-data" class="flex-grow-1 d-flex flex-column">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">CSV file</label>
+                            <input type="file" class="form-control" id="csvFile" name="file" accept=".csv">
+                            <div class="form-text">PaySim format: step, type, amount, nameOrig, &hellip;</div>
+                        </div>
+                        <div class="mt-auto">
+                            <button type="submit" class="btn btn-primary" id="uploadBtn">
+                                <i class="bi bi-upload me-1"></i>Upload &amp; Import
+                            </button>
+                        </div>
+                    </form>
+                    <div id="uploadResult" class="mt-3" style="display:none"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Server Path Import ===== -->
+        <div class="col-lg-6">
+            <div class="card h-100 card-recommended">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span class="d-flex align-items-center gap-2">
+                        <i class="bi bi-server text-primary"></i>
+                        Server Path Import
+                    </span>
+                    <span class="badge bg-primary"
+                          data-bs-toggle="tooltip"
+                          title="Preferred for files >500 MB. Skips the HTTP multipart overhead and reads the CSV directly off disk.">Recommended</span>
+                </div>
+                <div class="card-body d-flex flex-column">
+                    <p class="text-muted small mb-3">
+                        Reference a file already on the server. Skips multipart upload overhead &mdash;
+                        ideal for the full 6.3&nbsp;M-row PaySim dataset (&gt;500&nbsp;MB).
+                    </p>
+                    <form id="pathForm" class="flex-grow-1 d-flex flex-column">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">File path on server</label>
+                            <input type="text" class="form-control font-monospace" id="filePath" name="filePath"
+                                   placeholder="/data/paysim/transactions.csv">
+                            <div class="form-text">Absolute path readable by the application process</div>
+                        </div>
+                        <div class="mt-auto">
+                            <button type="submit" class="btn btn-primary" id="pathBtn">
+                                <i class="bi bi-folder2-open me-1"></i>Import
+                            </button>
+                        </div>
+                    </form>
+                    <div id="pathResult" class="mt-3" style="display:none"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Feature Engineering ===== -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-gear text-warning"></i>
+                    Feature Engineering
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-start">
+                        <div class="col-lg-8">
+                            <p class="text-muted small mb-2">
+                                Computes ML input features for every imported transaction that has not been processed yet.
+                                Features include z-scores, velocity counts (1h/24h), receiver diversity, balance ratios, and more.
+                                Run this manually after importing to prepare transactions for fraud detection. Safe to re-run — already processed rows are skipped.
+                            </p>
+                            <div class="d-flex flex-wrap gap-2">
+                                <span class="badge badge-soft badge-soft--primary"
+                                      data-bs-toggle="tooltip"
+                                      title="Uses PostgreSQL window functions in a single bulk INSERT rather than per-row computation. Audit B-3 / D-1.">
+                                    <i class="bi bi-lightning me-1"></i>Bulk SQL
+                                </span>
+                                <span class="badge badge-soft badge-soft--success"
+                                      data-bs-toggle="tooltip"
+                                      title="Safe to click multiple times — rows that already have features are skipped by a WHERE NOT EXISTS clause.">
+                                    <i class="bi bi-shield-check me-1"></i>Idempotent
+                                </span>
+                                <span class="badge badge-soft badge-soft--warning"
+                                      data-bs-toggle="tooltip"
+                                      title="Benchmarked on a 16-core Apple Silicon box with PostgreSQL 16 + pgvector. Scales roughly linearly below 10M rows.">
+                                    <i class="bi bi-clock me-1"></i>~3&ndash;8 min for 6.3M rows
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-lg-4 d-flex align-items-center justify-content-lg-end gap-2">
+                            <button class="btn btn-outline-danger btn-sm" id="clearFeaturesBtn"
+                                    title="Delete all computed features and start fresh">
+                                <i class="bi bi-trash me-1"></i>Clear
+                            </button>
+                            <button class="btn btn-warning" id="computeFeaturesBtn">
+                                <i class="bi bi-gear-fill me-1"></i>Compute Features
+                            </button>
+                        </div>
+                    </div>
+                    <div id="featureResult" class="mt-3" style="display:none"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Train / Test Split Finalization ===== -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-diagram-3 text-info"></i>
+                    Train / Test Split
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-start">
+                        <div class="col-lg-8">
+                            <p class="text-muted small mb-2">
+                                After import every row is flagged as training so ML training works immediately.
+                                Run this once per import to carve off the newest <strong id="ttsTestPctLabel">20%</strong>
+                                of rows (by timestamp) as a held-out test set &mdash; required for honest
+                                precision / recall / F1 metrics.
+                            </p>
+                            <div class="d-flex flex-wrap gap-2 align-items-center">
+                                <span class="badge badge-soft badge-soft--info"
+                                      data-bs-toggle="tooltip"
+                                      title="Uses PostgreSQL percentile_disc for an exact 80/20 split regardless of timestamp distribution.">
+                                    <i class="bi bi-clock-history me-1"></i>Temporal
+                                </span>
+                                <span class="badge badge-soft badge-soft--success"
+                                      data-bs-toggle="tooltip"
+                                      title="Safe to re-run — drops + rebuilds the training-split index around the UPDATE to keep WAL pressure low on multi-million-row tables.">
+                                    <i class="bi bi-shield-check me-1"></i>Idempotent
+                                </span>
+                                <label for="ttsRatio" class="small text-muted ms-2 mb-0">Training ratio</label>
+                                <input type="number" class="form-control form-control-sm" id="ttsRatio"
+                                       style="max-width:90px" min="0.5" max="0.95" step="0.05" value="0.80">
+                            </div>
+                        </div>
+                        <div class="col-lg-4 d-flex align-items-center justify-content-lg-end gap-2">
+                            <button class="btn btn-info" id="finalizeSplitBtn">
+                                <i class="bi bi-diagram-3-fill me-1"></i>Finalize Split
+                            </button>
+                        </div>
+                    </div>
+                    <div id="splitResult" class="mt-3" style="display:none"></div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /row -->
+</main>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // ── Job cancel tracking (JS-side, survives innerHTML redraws) ─────────────
+    const cancelledJobs = new Set();
+
+    async function cancelImport(jobId) {
+        cancelledJobs.add(jobId);
+        try {
+            await fetch('/api/v1/ingestion/jobs/' + jobId + '/cancel', { method: 'POST' });
+        } catch (e) {
+            cancelledJobs.delete(jobId);
+            console.error('Cancel request failed:', e);
+        }
+    }
+
+    // ── Auto-hide helper ──────────────────────────────────────────────────────
+    function scheduleHide(div, btn, delayMs) {
+        setTimeout(function() {
+            div.style.transition = 'opacity 0.6s';
+            div.style.opacity = '0';
+            setTimeout(function() {
+                div.style.display = 'none';
+                div.style.opacity = '1';
+                div.style.transition = '';
+                if (btn) btn.disabled = false;
+            }, 600);
+        }, delayMs);
+    }
+
+    // ── Progress panel HTML builder ───────────────────────────────────────────
+    function progressHtml(jobId, status, phase, total, processed, imported, skipped, elapsed, features, error) {
+        var pct        = total > 0 ? Math.round(processed * 100 / total) : 0;
+        var importing  = phase === 'IMPORTING';
+        var computing  = phase === 'COMPUTING_FEATURES';
+        var cancelPending = cancelledJobs.has(jobId);
+        var shortId    = jobId.substring(0, 8) + '\u2026';
+
+        // ── FAILED ──
+        if (status === 'FAILED') {
+            return '<div class="result-panel result-panel--danger">'
+                 + '<div class="d-flex align-items-center gap-2 mb-1">'
+                 + '<i class="bi bi-x-circle-fill text-danger"></i>'
+                 + '<strong class="text-danger">Import failed</strong>'
+                 + '</div>'
+                 + '<div class="text-muted small">' + (error || 'Unknown error') + '</div>'
+                 + '<div style="font-size:0.75rem;color:var(--fg-muted);margin-top:4px">Job: ' + shortId + '</div>'
+                 + '</div>';
+        }
+
+        // ── CANCELLED ──
+        if (status === 'CANCELLED') {
+            return '<div class="result-panel result-panel--warning">'
+                 + '<div class="d-flex align-items-center gap-2">'
+                 + '<i class="bi bi-stop-circle-fill text-warning"></i>'
+                 + '<span class="fw-semibold">Import stopped</span>'
+                 + '<span class="text-muted small ms-auto">' + elapsed + 's elapsed</span>'
+                 + '</div>'
+                 + '<div class="text-muted small mt-1">' + imported.toLocaleString() + ' rows committed before stop</div>'
+                 + '</div>';
+        }
+
+        // ── DONE ──
+        if (status === 'DONE') {
+            var isImportJob = (imported > 0 || skipped > 0);
+            var isFeatureJob = (features > 0 && !isImportJob);
+            var summary;
+            if (isFeatureJob) {
+                summary = '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+                        + '<strong>' + features.toLocaleString() + ' features computed</strong> in ' + elapsed + 's';
+            } else if (features === 0 && imported === 0 && skipped === 0) {
+                summary = '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+                        + '<strong>All transactions already have features</strong> &middot; ' + elapsed + 's';
+            } else {
+                summary = '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+                        + '<strong>' + imported.toLocaleString() + ' rows imported</strong>'
+                        + '&nbsp;&middot;&nbsp;' + elapsed + 's';
+            }
+            var skippedBadge = skipped > 0
+                ? '<span class="badge bg-warning text-dark ms-auto">' + skipped.toLocaleString() + ' skipped</span>'
+                : '';
+            return '<div class="result-panel result-panel--success">'
+                 + '<div class="d-flex align-items-center flex-wrap gap-2">'
+                 + summary + skippedBadge
+                 + '</div>'
+                 + '</div>';
+        }
+
+        // ── RUNNING / PENDING ──
+        var barPct, barLabel, barClass;
+        if (computing) {
+            if (total > 0 && processed > 0) {
+                barPct = pct; barLabel = pct + '%';
+                barClass = 'bg-warning';
+            } else {
+                barPct = 100; barLabel = 'Starting\u2026';
+                barClass = 'bg-warning progress-bar-striped progress-bar-animated';
+            }
+        } else if (importing && total > 0) {
+            barPct = pct; barLabel = pct + '%';
+            barClass = 'bg-primary progress-bar-striped progress-bar-animated';
+        } else {
+            barPct = 100; barLabel = 'Starting\u2026';
+            barClass = 'bg-secondary progress-bar-striped progress-bar-animated';
+        }
+
+        var phaseBadgeClass = computing ? 'bg-warning text-dark' : 'bg-primary';
+        var phaseIcon       = computing ? 'gear-fill' : 'arrow-repeat';
+        var phaseLabel      = computing ? 'Computing Features' : (status === 'PENDING' ? 'Pending' : 'Importing');
+
+        var statsLine;
+        if (computing) {
+            if (total > 0 && processed > 0) {
+                var etaSec = elapsed > 0 ? Math.round((total - processed) * elapsed / processed) : 0;
+                var etaStr = etaSec > 0 ? ' \u00b7 ~' + etaSec + 's remaining' : '';
+                statsLine = processed.toLocaleString() + ' / ' + total.toLocaleString() + ' features'
+                          + etaStr;
+            } else {
+                statsLine = '<span class="text-muted">Running bulk SQL window-function scan\u2026</span>'
+                          + '<span class="text-muted ms-3" style="font-size:0.78rem">Typically 3\u20138 min for 6.3M rows</span>';
+            }
+        } else if (importing && total > 0) {
+            statsLine = processed.toLocaleString() + ' / ' + total.toLocaleString() + ' rows'
+                      + '&nbsp;&middot;&nbsp;<span class="text-success">' + imported.toLocaleString() + ' imported</span>'
+                      + '&nbsp;&middot;&nbsp;<span class="text-warning">' + skipped.toLocaleString() + ' skipped</span>';
+        } else {
+            statsLine = '<span class="text-muted">Preparing\u2026</span>';
+        }
+
+        var cancelBtn = (importing && status === 'RUNNING')
+            ? '<button class="btn btn-sm btn-outline-danger" onclick="cancelImport(\'' + jobId + '\')"'
+              + (cancelPending ? ' disabled' : '') + '>'
+              + '<i class="bi bi-stop-circle me-1"></i>'
+              + (cancelPending ? 'Stopping\u2026' : 'Stop Import')
+              + '</button>'
+            : '';
+
+        return '<div class="result-panel result-panel--neutral" style="padding:12px">'
+             + '<div class="d-flex justify-content-between align-items-center mb-2">'
+             + '<span class="badge ' + phaseBadgeClass + '">'
+             + '<i class="bi bi-' + phaseIcon + ' me-1"></i>' + phaseLabel + '</span>'
+             + '<div class="d-flex align-items-center gap-2">'
+             + '<span class="text-muted" style="font-size:0.8rem">' + elapsed + 's elapsed</span>'
+             + cancelBtn
+             + '</div></div>'
+             + '<div class="progress mb-2" style="height:14px;border-radius:6px">'
+             + '<div class="progress-bar ' + barClass + '" style="width:' + barPct + '%;font-size:0.7rem">' + barLabel + '</div>'
+             + '</div>'
+             + '<div class="small" style="color:var(--fg-muted)">' + statsLine + '</div>'
+             + '</div>';
+    }
+
+    // ── Polling loop ──────────────────────────────────────────────────────────
+    // Uses FG.pollJob from /js/finguard.js. The render callbacks stay
+    // page-specific (progressHtml / scheduleHide) but the interval + terminal-
+    // state detection + cleanup now lives in one shared helper.
+    function startPolling(jobId, resultDiv, btn, storageKey) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = progressHtml(jobId, 'PENDING', null, 0, 0, 0, 0, 0, 0, null);
+
+        // Persist this job so navigation away and back can resume polling
+        if (storageKey) localStorage.setItem(storageKey, jobId);
+
+        function render(s) {
+            resultDiv.innerHTML = progressHtml(
+                jobId, s.status, s.phase,
+                s.totalRows, s.processedRows, s.importedRows, s.skippedRows,
+                s.elapsedSeconds, s.featuresComputed, s.errorMessage
+            );
+        }
+
+        FG.pollJob({
+            url: '/api/v1/ingestion/status/' + jobId,
+            intervalMs: 2000,
+            terminalStates: ['DONE', 'FAILED', 'CANCELLED'],
+            statePath: 'status',
+            onTick: render,
+            onComplete: function (s) {
+                render(s);
+                if (storageKey) localStorage.removeItem(storageKey);
+                if (s.status === 'DONE')      scheduleHide(resultDiv, btn, 8000);
+                if (s.status === 'CANCELLED') scheduleHide(resultDiv, btn, 3000);
+                if (s.status === 'FAILED' && btn) btn.disabled = false;
+            },
+            onError: function () {
+                if (storageKey) localStorage.removeItem(storageKey);
+            }
+        });
+    }
+
+    // Tooltips auto-init via /js/finguard.js (FG.initTooltips).
+
+    // ── Resume polling on page load if a job was active when user navigated away ──
+    document.addEventListener('DOMContentLoaded', async function() {
+        var jobs = [
+            { key: 'fg_upload_job',  divId: 'uploadResult',  btnId: 'uploadBtn' },
+            { key: 'fg_path_job',    divId: 'pathResult',    btnId: 'pathBtn' },
+            { key: 'fg_feature_job', divId: 'featureResult', btnId: 'computeFeaturesBtn' }
+        ];
+        for (var i = 0; i < jobs.length; i++) {
+            var j = jobs[i];
+            var savedId = localStorage.getItem(j.key);
+            if (!savedId) continue;
+            try {
+                var res = await fetch('/api/v1/ingestion/status/' + savedId);
+                if (!res.ok) { localStorage.removeItem(j.key); continue; }
+                var s = await res.json();
+                if (s.status === 'DONE' || s.status === 'FAILED' || s.status === 'CANCELLED') {
+                    localStorage.removeItem(j.key);
+                    continue;
+                }
+                // Job still running — resume
+                var div = document.getElementById(j.divId);
+                var btn = document.getElementById(j.btnId);
+                if (btn) btn.disabled = true;
+                startPolling(savedId, div, btn, j.key);
+            } catch (e) {
+                localStorage.removeItem(j.key);
+            }
+        }
+    });
+
+    // ── Generic submit helper ─────────────────────────────────────────────────
+    async function submitImport(url, fetchOptions, resultDiv, btn, storageKey) {
+        btn.disabled = true;
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Submitting\u2026</div>';
+        try {
+            var res = await fetch(url, fetchOptions);
+            var data = await res.json();
+            if (!res.ok) {
+                resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0"><i class="bi bi-x-circle me-1"></i>'
+                    + (data.detail || data.message || data.error || 'Request failed') + '</div>';
+                btn.disabled = false;
+                return;
+            }
+            startPolling(data.jobId, resultDiv, btn, storageKey);
+        } catch (err) {
+            resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0"><i class="bi bi-x-circle me-1"></i>' + err.message + '</div>';
+            btn.disabled = false;
+        }
+    }
+
+    // ── Upload form ───────────────────────────────────────────────────────────
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        var fileInput = document.getElementById('csvFile');
+        if (!fileInput.files.length) return;
+        var formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        await submitImport(
+            '/api/v1/ingestion/paysim/upload',
+            { method: 'POST', body: formData },
+            document.getElementById('uploadResult'),
+            document.getElementById('uploadBtn'),
+            'fg_upload_job'
+        );
+    });
+
+    // ── Path form ─────────────────────────────────────────────────────────────
+    document.getElementById('pathForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        var path = document.getElementById('filePath').value.trim();
+        if (!path) return;
+        await submitImport(
+            '/api/v1/ingestion/paysim/path?path=' + encodeURIComponent(path),
+            { method: 'POST' },
+            document.getElementById('pathResult'),
+            document.getElementById('pathBtn'),
+            'fg_path_job'
+        );
+    });
+
+    // ── Feature engineering ───────────────────────────────────────────────────
+    document.getElementById('computeFeaturesBtn').addEventListener('click', async function() {
+        await submitImport(
+            '/api/v1/ingestion/features/compute',
+            { method: 'POST' },
+            document.getElementById('featureResult'),
+            document.getElementById('computeFeaturesBtn'),
+            'fg_feature_job'
+        );
+    });
+
+    // ── Clear features ────────────────────────────────────────────────────────
+    document.getElementById('clearFeaturesBtn').addEventListener('click', async function() {
+        if (!confirm('Delete all computed features? This cannot be undone.\nYou can re-run \'Compute Features\' afterwards.')) return;
+        var btn = document.getElementById('clearFeaturesBtn');
+        var resultDiv = document.getElementById('featureResult');
+        btn.disabled = true;
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Clearing features\u2026</div>';
+        try {
+            var res = await fetch('/api/v1/ingestion/features', { method: 'DELETE' });
+            var data = await res.json();
+            if (!res.ok) {
+                resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0"><i class="bi bi-x-circle me-1"></i>'
+                    + (data.detail || data.message || 'Request failed') + '</div>';
+            } else {
+                resultDiv.innerHTML = '<div class="result-panel result-panel--danger">'
+                    + '<i class="bi bi-trash-fill text-danger me-2"></i>'
+                    + '<strong>' + data.deleted.toLocaleString() + ' feature rows deleted</strong>'
+                    + ' &middot; ready to re-compute'
+                    + '</div>';
+                setTimeout(function() {
+                    resultDiv.style.transition = 'opacity 0.6s';
+                    resultDiv.style.opacity = '0';
+                    setTimeout(function() {
+                        resultDiv.style.display = 'none';
+                        resultDiv.style.opacity = '1';
+                        resultDiv.style.transition = '';
+                    }, 600);
+                }, 5000);
+            }
+        } catch (err) {
+            resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0"><i class="bi bi-x-circle me-1"></i>' + err.message + '</div>';
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // ── Train/test split finalization ─────────────────────────────────────────
+    (function () {
+        var ratioInput  = document.getElementById('ttsRatio');
+        var pctLabel    = document.getElementById('ttsTestPctLabel');
+        var btn         = document.getElementById('finalizeSplitBtn');
+        var resultDiv   = document.getElementById('splitResult');
+
+        // Live-update the "newest X%" label as the ratio is edited.
+        function refreshPct() {
+            var r = parseFloat(ratioInput.value);
+            if (isNaN(r) || r <= 0 || r >= 1) { pctLabel.textContent = '20%'; return; }
+            pctLabel.textContent = Math.round((1 - r) * 100) + '%';
+        }
+        ratioInput.addEventListener('input', refreshPct);
+        refreshPct();
+
+        btn.addEventListener('click', async function () {
+            var ratio = parseFloat(ratioInput.value);
+            if (isNaN(ratio) || ratio <= 0 || ratio >= 1) {
+                alert('Training ratio must be between 0 and 1 (exclusive).');
+                return;
+            }
+            if (!confirm(
+                'Finalize train/test split with ratio ' + ratio + ' ?\n' +
+                'Newest ' + Math.round((1 - ratio) * 100) + '% of rows will become the test set.\n' +
+                'This can take 1-3 minutes on 6M rows.'
+            )) return;
+
+            btn.disabled = true;
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div class="text-muted small">' +
+                '<span class="spinner-border spinner-border-sm me-2"></span>' +
+                '<span id="splitPhaseLabel">Submitting split job\u2026</span>' +
+                '<div class="progress mt-2" style="height:6px">' +
+                '<div id="splitProgressBar" class="progress-bar bg-info" style="width:0%"></div>' +
+                '</div>' +
+                '</div>';
+
+            var phaseLabel  = document.getElementById('splitPhaseLabel');
+            var progressBar = document.getElementById('splitProgressBar');
+
+            try {
+                // Submit to the async endpoint — returns 202 with jobId immediately.
+                var res = await fetch(
+                    '/api/v1/ingestion/finalize-train-test-split-async?ratio=' + ratio,
+                    { method: 'POST' });
+                var data = await res.json();
+                if (!res.ok) {
+                    resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0">' +
+                        '<i class="bi bi-x-circle me-1"></i>' +
+                        (data.detail || data.message || 'Request failed') + '</div>';
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Poll the unified pipeline status endpoint for live phase updates.
+                FG.pollJob({
+                    url: data.statusUrl,
+                    intervalMs: 1000,
+                    terminalStates: ['COMPLETED', 'FAILED', 'CANCELLED'],
+                    statePath: 'phase',
+                    onTick: function (s) {
+                        var step = s.currentStep || s.phase || 'running';
+                        var pct  = Math.max(0, Math.min(100, s.progressPercent || 0));
+                        if (phaseLabel)  phaseLabel.textContent = 'Split: ' + step + ' (' + pct + '%)';
+                        if (progressBar) progressBar.style.width = pct + '%';
+                    },
+                    onComplete: function (s) {
+                        btn.disabled = false;
+                        if (s.phase === 'COMPLETED') {
+                            resultDiv.innerHTML = '<div class="result-panel result-panel--success">' +
+                                '<i class="bi bi-diagram-3-fill text-info me-2"></i>' +
+                                '<strong>Split finalized</strong>' +
+                                ' &middot; test-set rows created: <strong>' +
+                                (Number(s.alertsCreated || 0).toLocaleString()) + '</strong>' +
+                                '<div class="small text-muted mt-1">Reload the page to see updated counts.</div>' +
+                                '</div>';
+                        } else {
+                            resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0">' +
+                                '<i class="bi bi-x-circle me-1"></i>' +
+                                'Split ' + s.phase.toLowerCase() +
+                                (s.error ? ': ' + s.error : '') + '</div>';
+                        }
+                    },
+                    onError: function () {
+                        // Transient network errors ignored — poll loop retries.
+                    }
+                });
+            } catch (err) {
+                resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0">' +
+                    '<i class="bi bi-x-circle me-1"></i>' + err.message + '</div>';
+                btn.disabled = false;
+            }
+        });
+    })();
+</script>
+</body>
+</html>

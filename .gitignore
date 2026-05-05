@@ -1,0 +1,25 @@
+# === Build output ===
+target/
+
+# === IDE ===
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# === macOS ===
+.DS_Store
+
+# === Large data files (471 MB+ dataset) ===
+data/paysim/
+data/models/
+
+# === Environment & secrets ===
+.env
+.env.*
+
+# === Logs ===
+*.log
+
+# === Claude Code project config ===
+.claude/

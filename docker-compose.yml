@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with pgvector extension for transactional data + vector store
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: finguard-postgres
+    # Docker's default /dev/shm is 64 MB — far too small for Postgres parallel
+    # workers, especially with our tuned shared_buffers=2GB. Symptom when too
+    # small: "could not resize shared memory segment ... No space left on device"
+    # on any analytical query that uses parallel workers (COUNT, GROUP BY,
+    # window functions). 2 GB is generous for a thesis-laptop workload.
+    shm_size: 2gb
+    environment:
+      POSTGRES_DB: finguard
+      POSTGRES_USER: finguard
+      POSTGRES_PASSWORD: finguard_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # PostgreSQL tuning for bulk-import + analytical workload on a thesis laptop.
+    # Default Postgres ships with very conservative values (128MB shared_buffers,
+    # 4MB work_mem, 1GB max_wal_size) targeted at constrained shared hosting.
+    # On a developer MacBook with dedicated 16GB RAM, raising these is the
+    # single biggest performance lever — measured 1.5-2x faster bulk import.
+    command:
+      - postgres
+      # ── Memory ──────────────────────────────────────────────────────
+      # ~25% of available RAM for PG's shared cache. Lets large tables
+      # stay hot in memory.
+      - -c
+      - shared_buffers=2GB
+      # Per-operation working memory (sorts, hash joins, COPY parsing).
+      # 64MB is generous for analytical queries on millions of rows.
+      - -c
+      - work_mem=64MB
+      # Used by VACUUM, ANALYZE, and CREATE INDEX. The big number here
+      # is what makes "drop index → bulk load → recreate index" fast.
+      - -c
+      - maintenance_work_mem=1GB
+      # ── WAL / checkpoints ───────────────────────────────────────────
+      # Default 1GB triggers a checkpoint every ~30 seconds during bulk
+      # load; each checkpoint stalls writes briefly. 4GB stretches that
+      # to ~2-3 minutes — far less write amplification.
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      # Default checkpoint every 5 min → every 30 min. Fewer fsync stalls.
+      - -c
+      - checkpoint_timeout=30min
+      # Spread the checkpoint write over 90% of the timeout window
+      # (vs default 50%) so it doesn't all hit at once.
+      - -c
+      - checkpoint_completion_target=0.9
+      # WAL buffer — bigger means fewer WAL flushes during bursts of
+      # heavy inserts (e.g., COPY).
+      - -c
+      - wal_buffers=64MB
+      # ── Planner hints for SSD ───────────────────────────────────────
+      # Default random_page_cost=4 is for spinning disks. SSDs (and the
+      # Docker page cache on macOS) have ~equal seq/random cost.
+      - -c
+      - random_page_cost=1.1
+      # Tells planner how much OS page cache is available — encourages
+      # index-scan plans over seq-scan when warm data fits in RAM.
+      - -c
+      - effective_cache_size=4GB
+      # SSD parallel-read concurrency hint.
+      - -c
+      - effective_io_concurrency=200
+      # ── Logging discipline ──────────────────────────────────────────
+      # Log queries that take longer than 5 sec — useful for debugging
+      # slow detection runs without flooding the log on the fast path.
+      - -c
+      - log_min_duration_statement=5000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # 4 GB cap for the postgres container — leaves the rest of your
+    # 16 GB MacBook RAM for the JVM + Ollama + browser.
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # Ollama for local LLM inference (development mode)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: finguard-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # GPU support (uncomment if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  ollama_data:

@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.3</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>dev.finguard</groupId>
+    <artifactId>finguard</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <name>FinGuard</name>
+    <description>LLM-Augmented Transaction Anomaly Detection and Explanation System</description>
+
+    <properties>
+        <java.version>25</java.version>
+        <spring-ai.version>1.0.0</spring-ai.version>
+        <tribuo.version>4.3.1</tribuo.version>
+        <xgboost4j.version>2.0.3</xgboost4j.version>
+        <opencsv.version>5.9</opencsv.version>
+        <springdoc.version>2.8.6</springdoc.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Override Tribuo's xgboost4j 1.6.2 which lacks macOS aarch64 (Apple Silicon) support.
+                 1.7.6 bundles libxgboost4j.dylib for macos/aarch64. -->
+            <dependency>
+                <groupId>ml.dmlc</groupId>
+                <artifactId>xgboost4j_2.12</artifactId>
+                <version>${xgboost4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ml.dmlc</groupId>
+                <artifactId>xgboost-jvm_2.12</artifactId>
+                <version>${xgboost4j.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- ==================== Spring Boot Core ==================== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- ==================== Database ==================== -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.liquibase</groupId>
+            <artifactId>liquibase-core</artifactId>
+        </dependency>
+
+        <!-- ==================== Spring AI (LLM Integration) ==================== -->
+        <!-- Ollama for local development -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-ollama</artifactId>
+        </dependency>
+        <!-- Anthropic Claude -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-anthropic</artifactId>
+        </dependency>
+        <!-- OpenAI (also used for DeepSeek via compatible API) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+        <!-- pgvector for RAG -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
+        </dependency>
+
+        <!-- ==================== ML (Tribuo) ==================== -->
+        <dependency>
+            <groupId>org.tribuo</groupId>
+            <artifactId>tribuo-classification-sgd</artifactId>
+            <version>${tribuo.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.tribuo</groupId>
+            <artifactId>tribuo-classification-tree</artifactId>
+            <version>${tribuo.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.tribuo</groupId>
+            <artifactId>tribuo-classification-xgboost</artifactId>
+            <version>${tribuo.version}</version>
+            <!--
+                xgboost4j (transitive) ships commons-logging:1.2 on the classpath.
+                Spring Boot uses spring-jcl as its Commons-Logging bridge; having
+                both triggers the startup warning:
+                  "Standard Commons Logging discovery in action with spring-jcl:
+                   please remove commons-logging.jar from classpath..."
+                Exclude commons-logging here — spring-jcl provides the same API
+                so xgboost4j keeps working without any code change.
+            -->
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ==================== CSV Parsing ==================== -->
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>${opencsv.version}</version>
+            <!-- opencsv → commons-beanutils → commons-logging. See tribuo-classification-xgboost
+                 above for why we exclude commons-logging (spring-jcl is the active bridge). -->
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ==================== API Documentation ==================== -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+
+        <!-- ==================== Observability (Prometheus metrics) ==================== -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ==================== Resilience ==================== -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-aspects</artifactId>
+        </dependency>
+
+        <!-- ==================== Caching ==================== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
+        <!-- ==================== Statistics (paired t-test, Bonferroni) ==================== -->
+        <!--
+            Used by StatisticalSignificanceService (thesis §3.5). Apache Commons Math 3
+            ships TTest + TDistribution which avoids hand-rolling Student's t CDF for
+            small fold counts (df=4 for k=5 CV). ~2 MB; pure Java, no transitive deps.
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+
+        <!--
+            spring-boot-devtools REMOVED.
+            Reason (from the thesis benchmark post-mortem — THESIS_EVALUATION_GUIDE §10):
+            DevTools' FileSystemWatcher thread holds a monotonically-growing
+            classpath snapshot cache. Over a long benchmark run (>1 h) the cache
+            drifts into hundreds of MB and triggers the OOM cascade observed in
+            the first two benchmark attempts (stack trace bottomed out in
+            "File Watcher" → java.lang.OutOfMemoryError). DevTools provides zero
+            value for a thesis project — there's no live-reload development
+            workflow. Removing the dependency is cheaper and more reliable than
+            asking every run to remember `-Dspring.devtools.restart.enabled=false`.
+        -->
+
+        <!-- ==================== Testing ==================== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <!--
+                    JVM args applied every time `mvn spring-boot:run` starts the app.
+                    These exist so the thesis benchmark works regardless of how the
+                    app is launched — no one has to remember a long -D flag list.
+
+                    Rationale for each flag:
+                      -Xmx8g           — ceiling required to run the 6.3 M-row PaySim
+                                         benchmark without OOM. Default (4g) OOM'd
+                                         twice during Chapter 5 evaluation.
+                      -Xms2g           — start committed; avoids paging during
+                                         the first detection pass.
+                      -XX:+UseG1GC     — Java 25 default, pinned for reproducibility.
+                      MaxGCPauseMillis — keeps GC pauses <200 ms so polling banners
+                                         don't freeze.
+                      HeapDumpOn…      — if we do OOM despite all this, we get an
+                                         .hprof file to diagnose with VisualVM.
+
+                    Activate the benchmark Spring profile via
+                    spring-boot.run.profiles=benchmark if you want to also silence
+                    the MetricSnapshotRefresher and tighten cache sizes.
+                -->
+                <configuration>
+                    <jvmArguments>
+                        -Xmx8g
+                        -Xms2g
+                        -XX:+UseG1GC
+                        -XX:MaxGCPauseMillis=200
+                        -XX:+HeapDumpOnOutOfMemoryError
+                        -XX:HeapDumpPath=/tmp/finguard-oom.hprof
+                    </jvmArguments>
+                </configuration>
+            </plugin>
+
+            <!-- Unit tests: runs *Test classes (mvn test) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                    </excludes>
+                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+
+            <!-- Integration tests: runs *IT classes (mvn verify) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <repositories>
+        <repository>
+            <id>spring-releases</id>
+            <name>Spring Releases</name>
+            <url>https://repo.spring.io/release</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
+</project>

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — Transactions')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header d-flex justify-content-between align-items-start">
+        <div>
+            <h1><i class="bi bi-arrow-left-right me-2"></i>Transactions</h1>
+            <p>Browse ingested financial transactions with search, type &amp; source filters.</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary fs-6"
+                  th:text="${#numbers.formatInteger(page.totalElements, 1, 'COMMA') + ' matching'}">0 matching</span>
+            <button class="btn btn-sm btn-outline-danger" th:if="${totalTransactions > 0}"
+                    onclick="clearData('transactions', 'all transactions, alerts, and explanations', '/transactions')">
+                <i class="bi bi-trash3 me-1"></i>Clear all
+            </button>
+        </div>
+    </div>
+
+    <!-- ========== Stat strip (always shows dataset-wide totals) ========== -->
+    <div class="row g-3 mb-3">
+        <div class="col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--primary">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(totalTransactions, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    Total transactions
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Dataset-wide total — ignores any filter you've applied. The badge above shows rows matching the current filter."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--danger">
+                <div class="metric-tile__value"
+                     th:text="${#numbers.formatInteger(fraudTransactions, 1, 'COMMA')}">0</div>
+                <div class="metric-tile__label">
+                    Ground-truth fraud
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Transactions labelled isFraud=true in the source dataset. These are the rows the detection pipeline tries to catch."></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="metric-tile metric-tile--warning">
+                <div class="metric-tile__value"
+                     th:text="${fraudRatePercent} + '%'">0%</div>
+                <div class="metric-tile__label">
+                    Fraud rate
+                    <i class="bi bi-question-circle info-hint"
+                       data-bs-toggle="tooltip"
+                       title="Share of the full dataset that is ground-truth fraud. PaySim has ~0.13%, IBM AML has ~1–3%. A disproportionately high rate usually means the dataset is synthetic or filtered."></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Panel -->
+    <form th:action="@{/transactions}" method="get" id="txFilterForm">
+        <div class="filter-panel mb-3">
+            <!-- Row 1: Search + Type chips -->
+            <div class="filter-row">
+                <!-- Account search -->
+                <div class="filter-search-wrap">
+                    <i class="bi bi-search filter-search-icon"></i>
+                    <input type="text" name="search" id="searchInput" class="filter-search-input"
+                           placeholder="Search sender or receiver account…"
+                           th:value="${search}" autocomplete="off">
+                    <button type="button" class="filter-search-clear" id="clearSearch"
+                            th:classappend="${search != null and !#strings.isEmpty(search)} ? '' : 'd-none'"
+                            onclick="document.getElementById('searchInput').value='';this.classList.add('d-none');document.getElementById('txFilterForm').submit()">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+
+                <!-- Fraud toggle -->
+                <label class="filter-toggle" th:classappend="${fraudOnly} ? 'filter-toggle--active'">
+                    <input type="checkbox" name="fraudOnly" value="true" th:checked="${fraudOnly}"
+                           onchange="this.form.submit()" style="display:none">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>Fraud only
+                </label>
+            </div>
+
+            <!-- Row 2: Type pills + Source -->
+            <div class="filter-row filter-row--wrap">
+                <span class="filter-label">Type:</span>
+                <a th:href="@{/transactions(source=${selectedSource},fraudOnly=${fraudOnly},search=${search})}"
+                   th:classappend="${selectedType == null or #strings.isEmpty(selectedType)} ? 'filter-pill filter-pill--active' : 'filter-pill'">All</a>
+                <a th:each="tt : ${transactionTypes}"
+                   th:href="@{/transactions(source=${selectedSource},fraudOnly=${fraudOnly},search=${search},type=${tt.name()})}"
+                   th:classappend="${tt.name() == selectedType} ? 'filter-pill filter-pill--active filter-pill--' + ${#strings.toLowerCase(tt.name())} : 'filter-pill filter-pill--' + ${#strings.toLowerCase(tt.name())}"
+                   th:text="${tt.displayName}">Type</a>
+
+                <div class="filter-divider"></div>
+
+                <span class="filter-label">Source:</span>
+                <a th:href="@{/transactions(fraudOnly=${fraudOnly},type=${selectedType},search=${search})}"
+                   th:classappend="${selectedSource == null or #strings.isEmpty(selectedSource)} ? 'filter-pill filter-pill--active' : 'filter-pill'">All</a>
+                <a th:each="src : ${sources}"
+                   th:href="@{/transactions(fraudOnly=${fraudOnly},type=${selectedType},search=${search},source=${src.name()})}"
+                   th:classappend="${src.name() == selectedSource} ? 'filter-pill filter-pill--active' : 'filter-pill'"
+                   th:text="${src.displayName}">Source</a>
+
+                <div class="ms-auto d-flex align-items-center gap-2">
+                    <a th:href="@{/transactions}" class="filter-clear-btn"
+                       th:if="${(selectedSource != null and !#strings.isEmpty(selectedSource)) or (selectedType != null and !#strings.isEmpty(selectedType)) or fraudOnly or (search != null and !#strings.isEmpty(search))}">
+                        <i class="bi bi-x-circle me-1"></i>Clear all filters
+                    </a>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    <!-- Active filter summary chips -->
+    <div class="d-flex flex-wrap gap-2 mb-3"
+         th:if="${(selectedSource != null and !#strings.isEmpty(selectedSource)) or (selectedType != null and !#strings.isEmpty(selectedType)) or fraudOnly or (search != null and !#strings.isEmpty(search))}">
+        <span class="active-chip" th:if="${fraudOnly}">
+            <i class="bi bi-exclamation-triangle-fill me-1" style="color:#ef4444"></i>Fraud only
+            <a th:href="@{/transactions(source=${selectedSource},type=${selectedType},search=${search})}" class="chip-remove"><i class="bi bi-x"></i></a>
+        </span>
+        <span class="active-chip" th:if="${selectedType != null and !#strings.isEmpty(selectedType)}"
+              th:text="${'Type: ' + selectedType}">
+            <a th:href="@{/transactions(source=${selectedSource},fraudOnly=${fraudOnly},search=${search})}" class="chip-remove"><i class="bi bi-x"></i></a>
+        </span>
+        <span class="active-chip" th:if="${selectedSource != null and !#strings.isEmpty(selectedSource)}"
+              th:text="${'Source: ' + selectedSource}">
+            <a th:href="@{/transactions(type=${selectedType},fraudOnly=${fraudOnly},search=${search})}" class="chip-remove"><i class="bi bi-x"></i></a>
+        </span>
+        <span class="active-chip" th:if="${search != null and !#strings.isEmpty(search)}">
+            <i class="bi bi-search me-1"></i><span th:text="${search}">q</span>
+            <a th:href="@{/transactions(source=${selectedSource},fraudOnly=${fraudOnly},type=${selectedType})}" class="chip-remove"><i class="bi bi-x"></i></a>
+        </span>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>External ID</th>
+                        <th>Type</th>
+                        <th class="text-end">Amount</th>
+                        <th>Sender</th>
+                        <th>Receiver</th>
+                        <th>Timestamp</th>
+                        <th>Source</th>
+                        <th>Label</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="tx : ${page.content}"
+                        th:classappend="${tx.isFraud} ? 'tx-row-fraud'">
+                        <td class="text-muted" style="font-size:0.82rem" th:text="${tx.id}">1</td>
+                        <td>
+                            <code class="tx-code" th:text="${#strings.abbreviate(tx.externalId, 18)}">ext-id</code>
+                        </td>
+                        <td>
+                            <span class="badge tx-type-badge"
+                                  th:classappend="${tx.transactionType.name() == 'TRANSFER'} ? 'tx-type-transfer' :
+                                                  (${tx.transactionType.name() == 'CASH_OUT'} ? 'tx-type-cashout' :
+                                                  (${tx.transactionType.name() == 'PAYMENT'} ? 'tx-type-payment' :
+                                                  (${tx.transactionType.name() == 'CASH_IN'} ? 'tx-type-cashin' : 'tx-type-other')))"
+                                  th:text="${tx.transactionType.displayName}">Transfer</span>
+                        </td>
+                        <td class="text-end fw-bold">
+                            <span th:classappend="${tx.amount >= 100000} ? 'amount-high' :
+                                                   (${tx.amount >= 10000} ? 'amount-medium' : 'amount-normal')"
+                                  th:text="'$' + ${#numbers.formatDecimal(tx.amount, 1, 'COMMA', 2, 'POINT')}">$0.00</span>
+                        </td>
+                        <td><code class="tx-code" th:text="${#strings.abbreviate(tx.senderAccount, 14)}">sender</code></td>
+                        <td><code class="tx-code" th:text="${#strings.abbreviate(tx.receiverAccount, 14)}">receiver</code></td>
+                        <td class="text-muted" style="white-space:nowrap;font-size:0.83rem"
+                            th:text="${#temporals.format(tx.timestamp, 'yyyy-MM-dd HH:mm')}">2024-01-01</td>
+                        <td class="text-muted" style="font-size:0.82rem" th:text="${tx.datasetSource.displayName}">PaySim</td>
+                        <td>
+                            <span th:if="${tx.isFraud}" class="badge badge-status badge-confirmed">
+                                <i class="bi bi-exclamation-triangle-fill me-1"></i>FRAUD
+                            </span>
+                            <span th:unless="${tx.isFraud}" class="text-muted" style="font-size:0.82rem">—</span>
+                        </td>
+                    </tr>
+                    <tr th:if="${page.content.isEmpty()}">
+                        <td colspan="9" class="text-center py-5">
+                            <i class="bi bi-inbox" style="font-size:2.5rem;color:var(--fg-border)"></i>
+                            <div class="mt-2 text-muted">No transactions found.<br>
+                                <a th:href="@{/ingestion}" class="text-decoration-none" style="color:var(--fg-primary-h)">Import a dataset</a> to get started.
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pagination — all filter params preserved (previously search & type were lost on page hop) -->
+    <nav th:if="${page.totalPages > 1}" class="mt-3">
+        <ul class="pagination pagination-sm justify-content-center">
+            <li class="page-item" th:classappend="${page.isFirst()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="@{/transactions(page=${page.number - 1}, source=${selectedSource}, type=${selectedType}, fraudOnly=${fraudOnly}, search=${search})}">
+                    <i class="bi bi-chevron-left"></i>
+                </a>
+            </li>
+            <li class="page-item" th:each="i : ${#numbers.sequence(0, page.totalPages - 1)}"
+                th:if="${page.totalPages <= 10 || (i < 3 || i > page.totalPages - 4 || (i >= page.number - 1 && i <= page.number + 1))}"
+                th:classappend="${i == page.number} ? 'active'">
+                <a class="page-link"
+                   th:href="@{/transactions(page=${i}, source=${selectedSource}, type=${selectedType}, fraudOnly=${fraudOnly}, search=${search})}"
+                   th:text="${i + 1}">1</a>
+            </li>
+            <li class="page-item" th:classappend="${page.isLast()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="@{/transactions(page=${page.number + 1}, source=${selectedSource}, type=${selectedType}, fraudOnly=${fraudOnly}, search=${search})}">
+                    <i class="bi bi-chevron-right"></i>
+                </a>
+            </li>
+        </ul>
+        <div class="text-center text-muted mt-1" style="font-size:0.8rem"
+             th:text="'Page ' + ${page.number + 1} + ' of ' + ${page.totalPages} + ' — ' + ${#numbers.formatInteger(page.totalElements, 1, 'COMMA')} + ' transactions'"></div>
+    </nav>
+</main>
+
+<style>
+/* ── Transaction type badges ── */
+.tx-code {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    background: rgba(255,255,255,0.04);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+}
+.tx-type-badge { font-size: 0.72rem; padding: 0.3em 0.55em; border-radius: 5px; }
+.tx-type-transfer { background: rgba(99,102,241,0.15); color: #818cf8; }
+.tx-type-cashout  { background: rgba(239,68,68,0.12);  color: #f87171; }
+.tx-type-payment  { background: rgba(34,197,94,0.12);  color: #4ade80; }
+.tx-type-cashin   { background: rgba(6,182,212,0.12);  color: #22d3ee; }
+.tx-type-other    { background: rgba(255,255,255,0.06); color: var(--fg-muted); }
+.amount-high   { color: #ef4444; }
+.amount-medium { color: #f59e0b; }
+.amount-normal { color: var(--fg-text); }
+.tx-row-fraud { background: rgba(239,68,68,0.04) !important; }
+.tx-row-fraud:hover { background: rgba(239,68,68,0.08) !important; }
+
+/* ── Filter panel ── */
+.filter-panel {
+    background: var(--fg-card);
+    border: 1px solid var(--fg-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.filter-row--wrap { flex-wrap: wrap; }
+
+/* Search input */
+.filter-search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 220px;
+    max-width: 420px;
+}
+.filter-search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-muted);
+    font-size: 0.82rem;
+    pointer-events: none;
+}
+.filter-search-input {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--fg-border);
+    border-radius: 7px;
+    color: var(--fg-text);
+    font-size: 0.85rem;
+    padding: 6px 32px 6px 30px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.filter-search-input::placeholder { color: var(--fg-muted); }
+.filter-search-input:focus {
+    border-color: var(--fg-primary-h);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+.filter-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+.filter-search-clear:hover { color: var(--fg-text); }
+
+/* Fraud toggle */
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--fg-border);
+    background: rgba(255,255,255,0.03);
+    color: var(--fg-muted);
+    font-size: 0.82rem;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+.filter-toggle:hover { border-color: #ef4444; color: #ef4444; }
+.filter-toggle--active {
+    background: rgba(239,68,68,0.12);
+    border-color: rgba(239,68,68,0.4);
+    color: #f87171;
+}
+
+/* Type / Source pills */
+.filter-label {
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    white-space: nowrap;
+}
+.filter-pill {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    border: 1px solid var(--fg-border);
+    background: rgba(255,255,255,0.03);
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: all 0.13s;
+    white-space: nowrap;
+}
+.filter-pill:hover { border-color: rgba(255,255,255,0.25); color: var(--fg-text); }
+.filter-pill--active {
+    background: rgba(99,102,241,0.18);
+    border-color: rgba(99,102,241,0.45);
+    color: #a5b4fc;
+}
+/* Per-type active colors */
+.filter-pill--transfer.filter-pill--active { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.4); color: #818cf8; }
+.filter-pill--cash_out.filter-pill--active  { background: rgba(239,68,68,0.14);  border-color: rgba(239,68,68,0.4);  color: #f87171; }
+.filter-pill--payment.filter-pill--active   { background: rgba(34,197,94,0.13);  border-color: rgba(34,197,94,0.4);  color: #4ade80; }
+.filter-pill--cash_in.filter-pill--active   { background: rgba(6,182,212,0.13);  border-color: rgba(6,182,212,0.4);  color: #22d3ee; }
+.filter-pill--debit.filter-pill--active     { background: rgba(251,191,36,0.13); border-color: rgba(251,191,36,0.4); color: #fbbf24; }
+
+/* Hover variants */
+.filter-pill--transfer:hover { color: #818cf8; }
+.filter-pill--cash_out:hover { color: #f87171; }
+.filter-pill--payment:hover  { color: #4ade80; }
+.filter-pill--cash_in:hover  { color: #22d3ee; }
+.filter-pill--debit:hover    { color: #fbbf24; }
+
+.filter-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--fg-border);
+    margin: 0 4px;
+}
+.filter-clear-btn {
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.13s;
+}
+.filter-clear-btn:hover { color: #ef4444; }
+
+/* Active filter chips */
+.active-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px 3px 10px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.3);
+    color: #a5b4fc;
+}
+.chip-remove {
+    display: inline-flex;
+    align-items: center;
+    color: inherit;
+    opacity: 0.6;
+    text-decoration: none;
+    transition: opacity 0.1s;
+    margin-left: 2px;
+}
+.chip-remove:hover { opacity: 1; }
+</style>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // Show/hide clear button as user types in the search field
+    const searchInput = document.getElementById('searchInput');
+    const clearSearch = document.getElementById('clearSearch');
+    if (searchInput && clearSearch) {
+        searchInput.addEventListener('input', () => {
+            clearSearch.classList.toggle('d-none', searchInput.value.length === 0);
+        });
+        // Submit on Enter
+        searchInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); document.getElementById('txFilterForm').submit(); }
+        });
+    }
+
+    async function clearData(entity, label, redirectTo) {
+        if (!confirm('Delete ' + label + '?\n\nThis is irreversible. All related data will also be removed.')) return;
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const res = await fetch('/api/v1/data/' + entity, { method: 'DELETE' });
+            if (res.ok) { window.location.href = redirectTo; }
+            else { alert('Delete failed: ' + res.status); btn.disabled = false; btn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Clear all'; }
+        } catch(e) { alert(e.message); btn.disabled = false; }
+    }
+</script>
+</body>
+</html>

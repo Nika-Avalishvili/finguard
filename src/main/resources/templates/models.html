@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('FinGuard — ML Models')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: sidebar}"></nav>
+
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="bi bi-cpu me-2"></i>ML Models</h1>
+        <p>Train, load, and manage fraud detection classifiers</p>
+    </div>
+
+    <div class="row g-3">
+
+        <!-- ── Left: main content ─────────────────────────────────── -->
+        <div class="col-lg-8">
+
+            <!-- Algorithm overview -->
+            <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-diagram-3 me-1"></i>What Will Be Trained
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+
+                        <!-- Random Forest -->
+                        <div class="col-md-6">
+                            <div class="algo-card algo-rf">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <div class="algo-icon algo-icon-rf"><i class="bi bi-tree-fill"></i></div>
+                                    <div>
+                                        <div class="fw-semibold" style="font-size:0.9rem">Random Forest</div>
+                                        <div class="text-muted" style="font-size:0.7rem">Pure Java · Tribuo 4.3</div>
+                                    </div>
+                                </div>
+                                <p class="algo-desc">
+                                    Ensemble of <strong>100 decision trees</strong>. Each tree is trained on a
+                                    random subset of features (√13 ≈ 3–4 per split). Final prediction is a
+                                    majority vote — robust to noise and rarely overfits.
+                                </p>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="algo-pill algo-pill-rf"><i class="bi bi-check2 me-1"></i>No native deps</span>
+                                    <span class="algo-pill algo-pill-rf"><i class="bi bi-shield me-1"></i>Stable</span>
+                                    <span class="algo-pill algo-pill-rf"><i class="bi bi-lightning me-1"></i>Fast inference</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- XGBoost -->
+                        <div class="col-md-6">
+                            <div class="algo-card algo-xgb">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <div class="algo-icon algo-icon-xgb"><i class="bi bi-graph-up-arrow"></i></div>
+                                    <div>
+                                        <div class="fw-semibold" style="font-size:0.9rem">XGBoost</div>
+                                        <div class="text-muted" style="font-size:0.7rem">Gradient Boosting · JNI</div>
+                                    </div>
+                                </div>
+                                <p class="algo-desc">
+                                    <strong>100 boosted trees</strong> trained sequentially — each one corrects
+                                    the residual errors of the previous. State-of-the-art on tabular data.
+                                    Requires the native XGBoost JNI library.
+                                </p>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <span class="algo-pill algo-pill-xgb"><i class="bi bi-stars me-1"></i>High accuracy</span>
+                                    <span class="algo-pill algo-pill-xgb"><i class="bi bi-cpu me-1"></i>Needs JNI</span>
+                                    <span class="algo-pill algo-pill-xgb"><i class="bi bi-arrow-repeat me-1"></i>Boosted</span>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Ensemble explanation -->
+                    <div class="ensemble-banner mt-3">
+                        <i class="bi bi-intersect me-2" style="color:var(--fg-primary-h)"></i>
+                        <span><strong>Ensemble mode (default):</strong> both models score each transaction independently.
+                        The <em>higher</em> fraud probability wins — a conservative, high-recall approach that minimises missed fraud.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Training -->
+            <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-lightning-fill me-1" style="color:var(--fg-warning)"></i>Train Models
+                </div>
+                <div class="card-body">
+
+                    <!-- What will happen -->
+                    <div class="result-panel result-panel--neutral mb-3">
+                        <div class="section-label mb-2" style="margin-bottom:0!important">
+                            <span>What happens when you click Train</span>
+                        </div>
+                        <div class="d-flex flex-column gap-2" style="font-size:0.82rem">
+                            <div class="d-flex align-items-start gap-2">
+                                <span class="train-step-num">1</span>
+                                <span><strong>Load training data</strong> — all transactions that have computed features are streamed in batches. Transactions without features are skipped.</span>
+                            </div>
+                            <div class="d-flex align-items-start gap-2">
+                                <span class="train-step-num">2</span>
+                                <span><strong>Train Random Forest</strong> — 100 CART trees on a feature-subset of the dataset. Labels: <code>FRAUD</code> vs <code>LEGIT</code>. Pure Java, always succeeds.</span>
+                            </div>
+                            <div class="d-flex align-items-start gap-2">
+                                <span class="train-step-num">3</span>
+                                <span><strong>Train XGBoost</strong> — 100 gradient-boosted trees via JNI. If the native library is unavailable on your OS, this stage is skipped gracefully.</span>
+                            </div>
+                            <div class="d-flex align-items-start gap-2">
+                                <span class="train-step-num">4</span>
+                                <span><strong>Save to disk</strong> — serialized model files written to <code>data/models/</code>. Auto-loaded on next application restart.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                        <button class="btn btn-warning fw-semibold px-3 d-inline-flex align-items-center gap-1"
+                                id="trainBtn" data-models="" title="Train both Random Forest and XGBoost">
+                            <i class="bi bi-lightning-fill"></i><span>Train Both</span>
+                        </button>
+                        <button class="btn btn-outline-warning px-3 d-inline-flex align-items-center gap-1"
+                                id="trainRfBtn" data-models="RF" title="Train Random Forest only (pure Java, always works)">
+                            <i class="bi bi-tree-fill me-1"></i><span>RF Only</span>
+                        </button>
+                        <button class="btn btn-outline-info px-3 d-inline-flex align-items-center gap-1"
+                                id="trainXgbBtn" data-models="XGBoost" title="Train XGBoost only (requires native JNI)">
+                            <i class="bi bi-graph-up-arrow me-1"></i><span>XGBoost Only</span>
+                        </button>
+                        <span class="text-muted" style="font-size:0.78rem">
+                            <i class="bi bi-clock me-1"></i>3–10 min · RF runs in parallel mini-forests
+                        </span>
+                    </div>
+
+                    <!-- Training progress display -->
+                    <div id="trainResult"></div>
+
+                </div>
+            </div>
+
+            <!-- Load from disk -->
+            <div class="card">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-box-arrow-in-down me-1"></i>Load Saved Models
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-center">
+                        <div class="col-md-8" style="font-size:0.83rem;color:var(--fg-muted)">
+                            Load previously trained models from <code>data/models/</code> on disk.
+                            Useful after a server restart — avoids re-training from scratch.
+                            Models are automatically saved to disk after each training run.
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" id="loadBtn">
+                                <i class="bi bi-box-arrow-in-down me-1"></i>Load from Disk
+                            </button>
+                        </div>
+                    </div>
+                    <div id="loadResult" class="mt-2" style="display:none"></div>
+                </div>
+            </div>
+
+        </div><!-- /col-lg-8 -->
+
+        <!-- ── Right: status + prerequisites ─────────────────────── -->
+        <div class="col-lg-4">
+
+            <!-- Model Status -->
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-activity me-1"></i>Model Status</div>
+                <div class="card-body text-center py-4">
+                    <div th:if="${modelsAvailable}">
+                        <div class="status-orb status-orb-green mb-3">
+                            <i class="bi bi-check2-circle"></i>
+                        </div>
+                        <h6 class="mb-1">Models Ready</h6>
+                        <p class="text-muted mb-0" style="font-size:0.8rem">
+                            Random Forest + XGBoost loaded in memory.<br>
+                            Go to <a href="/detection" style="color:var(--fg-primary-h)">Run Detection</a> to use them.
+                        </p>
+                    </div>
+                    <div th:unless="${modelsAvailable}">
+                        <div class="status-orb status-orb-amber mb-3">
+                            <i class="bi bi-exclamation-circle"></i>
+                        </div>
+                        <h6 class="mb-1">Not Trained</h6>
+                        <p class="text-muted mb-0" style="font-size:0.8rem">
+                            No models in memory. Train new models or load from disk.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prerequisites -->
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-card-checklist me-1"></i>Training Prerequisites</div>
+                <div class="card-body p-0">
+
+                    <div class="prereq-row" th:classappend="${totalTransactions > 0} ? 'prereq-ok' : 'prereq-warn'">
+                        <div class="d-flex align-items-center gap-2">
+                            <i th:if="${totalTransactions > 0}" class="bi bi-check-circle-fill text-success"></i>
+                            <i th:unless="${totalTransactions > 0}" class="bi bi-x-circle-fill text-warning"></i>
+                            <span style="font-size:0.82rem">Transactions</span>
+                        </div>
+                        <div class="text-end">
+                            <strong th:text="${#numbers.formatInteger(totalTransactions, 1, 'COMMA')}">0</strong>
+                            <span th:unless="${totalTransactions > 0}" class="ms-1">
+                                <a href="/ingestion" style="color:var(--fg-primary-h);font-size:0.72rem">Import →</a>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="prereq-row" th:classappend="${featuresComputed > 0} ? 'prereq-ok' : 'prereq-warn'" style="border-bottom:none">
+                        <div class="d-flex align-items-center gap-2">
+                            <i th:if="${featuresComputed > 0}" class="bi bi-check-circle-fill text-success"></i>
+                            <i th:unless="${featuresComputed > 0}" class="bi bi-x-circle-fill text-warning"></i>
+                            <span style="font-size:0.82rem">
+                                Features computed
+                                <i class="bi bi-question-circle text-muted ms-1" style="font-size:0.68rem"
+                                   data-bs-toggle="tooltip"
+                                   title="Transactions without features are skipped during training. More features = larger, more accurate training set."></i>
+                            </span>
+                        </div>
+                        <div class="text-end">
+                            <strong th:text="${#numbers.formatInteger(featuresComputed, 1, 'COMMA')}">0</strong>
+                            <span th:unless="${featuresComputed > 0}" class="ms-1">
+                                <a href="/ingestion" style="color:var(--fg-primary-h);font-size:0.72rem">Compute →</a>
+                            </span>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="card-footer p-2" style="font-size:0.73rem;color:var(--fg-muted)">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Only transactions with computed features are used as training examples.
+                    Fraud label comes from PaySim's <code>isFraud</code> column.
+                </div>
+            </div>
+
+            <!-- Feature inputs -->
+            <div class="card">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-list-check me-1"></i>Input Features</span>
+                    <span class="badge badge-soft badge-soft--primary">13 features</span>
+                </div>
+
+                <!-- Numeric group -->
+                <div class="feat-group-label">Numeric</div>
+                <div class="feat-row"><span class="feat-name feat-name--numeric">amount</span><span class="feat-desc">Raw transaction amount</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--numeric">amountZscore</span><span class="feat-desc">Deviation from 7-day avg</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--numeric">avgAmount7d</span><span class="feat-desc">7-day average amount</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--numeric">amountRatioToAvg</span><span class="feat-desc">Amount ÷ 7-day avg</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--numeric">balanceChangeRatio</span><span class="feat-desc">Amount ÷ account balance</span></div>
+
+                <!-- Count group -->
+                <div class="feat-group-label feat-group-label--divided">Count</div>
+                <div class="feat-row"><span class="feat-name feat-name--count">txVelocity1h</span><span class="feat-desc">Transactions last 1 hour</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--count">txVelocity24h</span><span class="feat-desc">Transactions last 24 hours</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--count">receiverDiversity7d</span><span class="feat-desc">Distinct receivers last 7 days</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--count">hourOfDay</span><span class="feat-desc">Hour of transaction (0–23)</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--count">dayOfWeek</span><span class="feat-desc">Day of week (1 = Mon)</span></div>
+
+                <!-- Boolean group -->
+                <div class="feat-group-label feat-group-label--divided">Boolean</div>
+                <div class="feat-row"><span class="feat-name feat-name--boolean">isNewReceiver</span><span class="feat-desc">First tx to this receiver</span></div>
+                <div class="feat-row"><span class="feat-name feat-name--boolean">isRoundAmount</span><span class="feat-desc">Amount divisible by 1,000</span></div>
+                <div class="feat-row feat-row-last"><span class="feat-name feat-name--boolean">isHighRiskType</span><span class="feat-desc">TRANSFER or CASH_OUT type</span></div>
+            </div>
+
+        </div><!-- /col-lg-4 -->
+
+    </div><!-- /row -->
+</main>
+
+<style>
+/* ── Algorithm cards ──────────────────────────────────────────── */
+.algo-card {
+    background: var(--fg-card);
+    border: 1px solid var(--fg-border);
+    border-radius: 10px;
+    padding: 14px;
+    height: 100%;
+}
+.algo-card.algo-rf  { border-top: 3px solid rgba(34,197,94,0.6); }
+.algo-card.algo-xgb { border-top: 3px solid rgba(99,102,241,0.6); }
+.algo-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; flex-shrink: 0;
+}
+.algo-icon-rf  { background: rgba(34,197,94,0.15);  color: var(--fg-success); }
+.algo-icon-xgb { background: rgba(99,102,241,0.15); color: var(--fg-primary-h); }
+.algo-desc {
+    font-size: 0.78rem; color: var(--fg-muted);
+    line-height: 1.5; margin: 0 0 10px 0;
+}
+.algo-pill {
+    display: inline-flex; align-items: center;
+    font-size: 0.65rem; font-weight: 600;
+    padding: 2px 7px; border-radius: 99px;
+}
+.algo-pill-rf  { background: rgba(34,197,94,0.12);  color: var(--fg-success); }
+.algo-pill-xgb { background: rgba(99,102,241,0.12); color: var(--fg-primary-h); }
+
+/* ── Ensemble banner ──────────────────────────────────────────── */
+.ensemble-banner {
+    background: rgba(99,102,241,0.06);
+    border: 1px solid rgba(99,102,241,0.18);
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 0.8rem; color: var(--fg-muted);
+    display: flex; align-items: flex-start; gap: 6px;
+}
+
+/* ── Train step numbers ───────────────────────────────────────── */
+.train-step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(245,158,11,0.15); color: var(--fg-warning);
+    font-size: 0.68rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+}
+
+/* ── Training stage progress ──────────────────────────────────── */
+.stage-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.stage-row:last-child { border-bottom: none; }
+.stage-icon {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.85rem; flex-shrink: 0;
+}
+.stage-icon-done    { background: rgba(34,197,94,0.2);  color: var(--fg-success); }
+.stage-icon-active  { background: rgba(245,158,11,0.2); color: var(--fg-warning); }
+.stage-icon-pending { background: var(--fg-border);     color: var(--fg-muted); }
+.stage-name { font-size: 0.83rem; font-weight: 500; }
+.stage-note { font-size: 0.72rem; color: var(--fg-muted); }
+
+/* ── Status orbs ──────────────────────────────────────────────── */
+.status-orb {
+    width: 64px; height: 64px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2rem; margin: 0 auto;
+}
+.status-orb-green { background: rgba(34,197,94,0.15);  color: var(--fg-success); }
+.status-orb-amber { background: rgba(245,158,11,0.15); color: var(--fg-warning); }
+
+/* ── Prereq rows ──────────────────────────────────────────────── */
+.prereq-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--fg-border);
+    font-size: 0.83rem;
+}
+.prereq-ok   { background: rgba(34,197,94,0.04); }
+.prereq-warn { background: rgba(245,158,11,0.04); }
+
+/* ── Input Features list ──────────────────────────────────────── */
+.feat-group-label {
+    padding: 5px 14px 4px;
+    font-size: 0.6rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    color: var(--fg-muted);
+    background: rgba(255,255,255,0.02);
+}
+.feat-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 5px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    gap: 8px;
+}
+.feat-row-last { border-bottom: none; }
+.feat-row:hover { background: rgba(99,102,241,0.04); }
+.feat-name {
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.72rem; font-weight: 500;
+    white-space: nowrap; flex-shrink: 0;
+}
+/* Semantic colour variants — was 13 inline `style="color:var(--fg-X)"` spans. */
+.feat-name--numeric { color: var(--fg-primary-h); }
+.feat-name--count   { color: var(--fg-info); }
+.feat-name--boolean { color: var(--fg-success); }
+.feat-desc {
+    font-size: 0.7rem; color: var(--fg-muted);
+    text-align: right; line-height: 1.3;
+}
+.feat-group-label--divided { border-top: 1px solid var(--fg-border); }
+</style>
+
+<div th:replace="~{fragments/layout :: logPanel}"></div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script>
+    // Tooltips auto-init via /js/finguard.js (FG.initTooltips).
+
+    // ── Training stage definitions ────────────────────────────────────────────
+    var STAGES = [
+        { key: 'Loading training data',   label: 'Loading training data',
+          note: 'Streaming transactions with features from the database' },
+        { key: 'Training Random Forest',  label: 'Training Random Forest',
+          note: '100 decision trees · pure Java · typically 10–60 s' },
+        { key: 'Training XGBoost',        label: 'Training XGBoost',
+          note: '100 gradient-boosted trees · JNI · typically 20–90 s' },
+        { key: 'Saving models to disk',   label: 'Saving to disk',
+          note: 'Writing serialized models to data/models/' }
+    ];
+
+    function stageIndex(currentStep) {
+        var idx = STAGES.findIndex(function(s) { return s.key === currentStep; });
+        return idx >= 0 ? idx : -1;
+    }
+
+    // ── Progress HTML builder ─────────────────────────────────────────────────
+    function trainingProgressHtml(phase, currentStep, pct, elapsed, error, summary) {
+        if (phase === 'FAILED') {
+            var hint = '';
+            if (error && error.toLowerCase().includes('feature')) {
+                hint = '<div class="mt-2 small" style="color:var(--fg-muted)">'
+                     + '<i class="bi bi-lightbulb me-1"></i>Hint: Run "Compute Features" on the '
+                     + '<a href="/ingestion" style="color:var(--fg-primary-h)">Data Ingestion</a> page first.</div>';
+            }
+            return '<div class="result-panel result-panel--danger">'
+                 + '<div class="d-flex align-items-center gap-2 mb-2"><i class="bi bi-x-circle-fill text-danger"></i>'
+                 + '<strong class="text-danger">Training failed</strong></div>'
+                 + '<div class="small font-monospace" style="color:var(--fg-muted);word-break:break-word">' + (error || 'Unknown error') + '</div>'
+                 + hint + '</div>';
+        }
+
+        if (phase === 'COMPLETED') {
+            var models = summary && summary.trainedModels ? summary.trainedModels.join(' + ') : 'Models';
+            var examples = summary && summary.totalExamples ? summary.totalExamples.toLocaleString() : '';
+            var fraud = summary && summary.fraudCount ? summary.fraudCount.toLocaleString() : '';
+            var timeS = summary && summary.trainingTimeMs ? (summary.trainingTimeMs / 1000).toFixed(1) : elapsed;
+            var fraudRate = (summary && summary.totalExamples && summary.fraudCount && summary.totalExamples > 0)
+                ? (100.0 * summary.fraudCount / summary.totalExamples).toFixed(3) + '%'
+                : '';
+            return '<div class="result-panel result-panel--success">'
+                 + '<div class="d-flex align-items-center flex-wrap gap-2 mb-3">'
+                 + '<i class="bi bi-check-circle-fill text-success fs-5"></i>'
+                 + '<strong>Training complete!</strong>'
+                 + '<span class="badge badge-soft badge-soft--success ms-auto">' + models + '</span>'
+                 + '</div>'
+                 + '<div class="row g-3 mb-3" style="font-size:0.83rem">'
+                 + '<div class="col-6 col-md-3"><div class="text-muted mb-1" style="font-size:0.68rem;font-weight:600">EXAMPLES</div><strong>' + (examples || '—') + '</strong></div>'
+                 + '<div class="col-6 col-md-3"><div class="text-muted mb-1" style="font-size:0.68rem;font-weight:600">FRAUD RATE</div><strong>' + (fraudRate || '—') + '</strong></div>'
+                 + '<div class="col-6 col-md-3"><div class="text-muted mb-1" style="font-size:0.68rem;font-weight:600">TRAIN TIME</div><strong>' + timeS + 's</strong></div>'
+                 + '<div class="col-6 col-md-3"><div class="text-muted mb-1" style="font-size:0.68rem;font-weight:600">MODELS</div><strong>' + (summary && summary.trainedModels ? summary.trainedModels.length : '—') + '</strong></div>'
+                 + '</div>'
+                 + '<a href="/detection" class="btn btn-outline-secondary btn-sm">'
+                 + '<i class="bi bi-search me-1"></i>Run Detection</a>'
+                 + '</div>';
+        }
+
+        // RUNNING — show stage pipeline
+        var activeIdx = stageIndex(currentStep);
+        var stagesHtml = STAGES.map(function(stage, i) {
+            var iconClass, iconHtml, nameStyle = '';
+            if (i < activeIdx) {
+                iconClass = 'stage-icon-done';
+                iconHtml  = '<i class="bi bi-check2"></i>';
+            } else if (i === activeIdx) {
+                iconClass = 'stage-icon-active';
+                iconHtml  = '<span class="spinner-border spinner-border-sm"></span>';
+                nameStyle = 'color:var(--fg-warning)';
+            } else {
+                iconClass = 'stage-icon-pending';
+                iconHtml  = '<i class="bi bi-hourglass"></i>';
+            }
+            return '<div class="stage-row">'
+                 + '<div class="stage-icon ' + iconClass + '">' + iconHtml + '</div>'
+                 + '<div class="flex-grow-1">'
+                 + '<div class="stage-name" style="' + nameStyle + '">' + stage.label + '</div>'
+                 + (i === activeIdx ? '<div class="stage-note">' + stage.note + '</div>' : '')
+                 + '</div>'
+                 + (i === activeIdx ? '<span class="text-muted" style="font-size:0.75rem">' + elapsed + 's</span>' : '')
+                 + '</div>';
+        }).join('');
+
+        return '<div class="result-panel result-panel--neutral">'
+             + '<div class="d-flex align-items-center justify-content-between mb-3">'
+             + '<span class="badge badge-soft badge-soft--warning">'
+             + '<span class="spinner-border spinner-border-sm me-1"></span>Training in progress</span>'
+             + '<span class="text-muted" style="font-size:0.78rem">' + elapsed + 's elapsed</span>'
+             + '</div>'
+             + stagesHtml
+             + '<div class="mt-3"><div class="progress" style="height:6px;border-radius:3px">'
+             + '<div class="progress-bar bg-warning progress-bar-striped progress-bar-animated" style="width:' + (pct || 5) + '%"></div>'
+             + '</div></div>'
+             + '</div>';
+    }
+
+    // ── Polling ───────────────────────────────────────────────────────────────
+    function elapsedSeconds(startedAt) {
+        if (!startedAt) return 0;
+        return Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
+    }
+
+    // Polling uses FG.pollJob from /js/finguard.js. Interval + terminal-state
+    // detection + cleanup now live in one shared helper; render / button-state
+    // logic stays page-specific.
+    function startTrainingPolling(jobId, resultDiv, btn) {
+        localStorage.setItem('fg_model_training_job', jobId);
+        var defaultLabel = '<i class="bi bi-lightning-fill"></i><span>Train Models</span>';
+
+        function clearJobAndResetBtn() {
+            localStorage.removeItem('fg_model_training_job');
+            btn.disabled = false;
+            btn.innerHTML = defaultLabel;
+        }
+
+        FG.pollJob({
+            url: '/api/v1/models/training-status/' + jobId,
+            intervalMs: 1500,
+            terminalStates: ['COMPLETED', 'FAILED'],
+            statePath: 'phase',
+            onTick: function (s) {
+                var elapsed = elapsedSeconds(s.startedAt);
+                resultDiv.innerHTML = trainingProgressHtml('RUNNING', s.currentStep, s.progressPercent, elapsed, null, null);
+            },
+            onComplete: async function (s) {
+                var elapsed = elapsedSeconds(s.startedAt);
+                if (s.phase === 'COMPLETED') {
+                    // Fetch detailed training-result summary for the winners panel.
+                    var summary = null;
+                    try { summary = await FG.fetchJson('/api/v1/models/training-result/' + jobId); }
+                    catch (e) { /* best-effort; template handles null summary */ }
+                    resultDiv.innerHTML = trainingProgressHtml('COMPLETED', '', 100, elapsed, null, summary);
+                    clearJobAndResetBtn();
+                    refreshModelStatus();
+                } else {
+                    resultDiv.innerHTML = trainingProgressHtml('FAILED', '', 0, elapsed, s.error, null);
+                    clearJobAndResetBtn();
+                }
+            },
+            onError: clearJobAndResetBtn
+        });
+    }
+
+    // ── Model status badge refresh ─────────────────────────────────────────────
+    async function refreshModelStatus() {
+        try {
+            var res = await fetch('/api/v1/models/status');
+            if (!res.ok) return;
+            var data = await res.json();
+            // Reload page to update Thymeleaf status orb
+            window.location.reload();
+        } catch (e) {}
+    }
+
+    // ── Resume on page load ───────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', async function() {
+        var savedId = localStorage.getItem('fg_model_training_job');
+        if (!savedId) return;
+        try {
+            var res = await fetch('/api/v1/models/training-status/' + savedId);
+            if (!res.ok) { localStorage.removeItem('fg_model_training_job'); return; }
+            var s = await res.json();
+            if (s.phase === 'COMPLETED' || s.phase === 'FAILED') {
+                localStorage.removeItem('fg_model_training_job');
+                return;
+            }
+            var btn = document.getElementById('trainBtn');
+            var resultDiv = document.getElementById('trainResult');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Training\u2026';
+            startTrainingPolling(savedId, resultDiv, btn);
+        } catch (e) {
+            localStorage.removeItem('fg_model_training_job');
+        }
+    });
+
+    // ── Train buttons (Both / RF Only / XGBoost Only) ────────────────────────
+    async function handleTrainClick(btn, models) {
+        var resultDiv = document.getElementById('trainResult');
+        var allTrainBtns = ['trainBtn', 'trainRfBtn', 'trainXgbBtn']
+            .map(id => document.getElementById(id)).filter(Boolean);
+        allTrainBtns.forEach(b => { b.disabled = true; });
+        var origHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting…';
+        resultDiv.innerHTML = '';
+
+        try {
+            var url = '/api/v1/models/train/async' + (models ? '?models=' + encodeURIComponent(models) : '');
+            var res  = await fetch(url, { method: 'POST' });
+            var data = await res.json();
+            if (!res.ok) {
+                resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0 small"><i class="bi bi-x-circle me-1"></i>'
+                    + (data.detail || data.message || JSON.stringify(data)) + '</div>';
+                allTrainBtns.forEach(b => { b.disabled = false; });
+                btn.innerHTML = origHtml;
+                return;
+            }
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Training…';
+            startTrainingPolling(data.jobId, resultDiv, btn);
+            // Re-enable other buttons after polling starts
+            allTrainBtns.filter(b => b !== btn).forEach(b => { b.disabled = false; });
+        } catch (err) {
+            resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0 small">' + err.message + '</div>';
+            allTrainBtns.forEach(b => { b.disabled = false; });
+            btn.innerHTML = origHtml;
+        }
+    }
+
+    document.getElementById('trainBtn').addEventListener('click', function() { handleTrainClick(this, ''); });
+    document.getElementById('trainRfBtn').addEventListener('click', function() { handleTrainClick(this, 'RF'); });
+    document.getElementById('trainXgbBtn').addEventListener('click', function() { handleTrainClick(this, 'XGBoost'); });
+
+
+    // ── Load button ───────────────────────────────────────────────────────────
+    document.getElementById('loadBtn').addEventListener('click', async function() {
+        var btn = document.getElementById('loadBtn');
+        var resultDiv = document.getElementById('loadResult');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading\u2026';
+        resultDiv.style.display = 'block';
+        try {
+            var res = await fetch('/api/v1/models/load', { method: 'POST' });
+            if (res.ok) {
+                resultDiv.innerHTML = '<div class="result-panel result-panel--success" style="padding:10px;font-size:0.82rem">'
+                    + '<i class="bi bi-check-circle-fill text-success me-2"></i>'
+                    + 'Models loaded from disk. <a href="/detection" style="color:var(--fg-primary-h)">Run Detection →</a>'
+                    + '</div>';
+                setTimeout(function() { window.location.reload(); }, 2000);
+            } else {
+                var data = await res.json();
+                resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0 small"><i class="bi bi-x-circle me-1"></i>'
+                    + (data.detail || data.message || 'Failed to load models') + '</div>';
+            }
+        } catch (err) {
+            resultDiv.innerHTML = '<div class="alert alert-danger p-2 mb-0 small">' + err.message + '</div>';
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-box-arrow-in-down me-1"></i>Load from Disk';
+    });
+</script>
+</body>
+</html>
