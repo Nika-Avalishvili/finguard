@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 FinGuard is a master's thesis application demonstrating **LLM-Based Transaction Anomaly Detection and Explanation in Fintech**. It combines rule-based detection, ML (Tribuo Random Forest + XGBoost), and LLM explanation generation (Spring AI + Ollama locally, Claude API for evaluation) with a RAG pipeline using pgvector.
 
 **Author:** Nika Avalishvili
-**Stack:** Java 21 · Spring Boot 3.4.3 · Maven · PostgreSQL + pgvector · Liquibase · Spring AI · Tribuo · Thymeleaf + HTMX + Chart.js
+**Stack:** Java 25 · Spring Boot 3.5.3 · Maven · PostgreSQL + pgvector · Liquibase · Spring AI · Tribuo · Thymeleaf + HTMX + Chart.js
 
 ---
 
@@ -176,14 +176,14 @@ Beyond the clean-architecture layers, the codebase is organized by feature:
 - Always run `./mvnw verify` after any code changes to confirm all tests pass
 - When changing repository method signatures, immediately check and update all test mocks that reference the old signature
 - When fixing one test, run the full suite — fixes often break other tests via mock/cache interactions
-- Use `@MockitoBean` (not `@MockBean`) for Spring Boot 3.4.3+
+- Use `@MockitoBean` (not `@MockBean`) for Spring Boot 3.4+
 
 ---
 
 ## Build & Run
 
 - Build: `./mvnw clean verify`
-- Language: Java 21, Spring Boot 3.4.3
+- Language: Java 25, Spring Boot 3.5.3
 - Database: PostgreSQL (must be running before tests)
 
 ---

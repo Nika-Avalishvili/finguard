@@ -1,7 +1,7 @@
 # FinGuard — LLM-Based Transaction Anomaly Detection & Explanation
 
 > **Master's Thesis Project** · Nika Avalishvili  
-> Stack: Java 21 · Spring Boot 3.4 · Spring AI · Tribuo · PostgreSQL + pgvector · Ollama · Thymeleaf + HTMX
+> Stack: Java 25 · Spring Boot 3.5 · Spring AI · Tribuo · PostgreSQL + pgvector · Ollama · Thymeleaf + HTMX
 
 FinGuard is a research platform that combines rule-based detection, machine learning (Random Forest + XGBoost), and large language models with Retrieval-Augmented Generation (RAG) to detect and explain financial fraud. Five experimental configurations are evaluated using precision, recall, F1, AUC-ROC, and the custom **CAKR** explanation quality metric (Completeness, Accuracy, Actionability, Regulatory compliance).
 
@@ -40,7 +40,7 @@ LLM provider is swappable via Spring profile:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Java | 21+ | Required |
+| Java | 25+ | Required |
 | Maven | 3.9+ | Or use `./mvnw` wrapper |
 | Docker + Docker Compose | 24+ | For PostgreSQL + pgvector + Ollama |
 | PaySim CSV | — | [Generate or download](https://github.com/EdgarLopezPhD/PaySim) |
