@@ -177,14 +177,22 @@ Beyond the clean-architecture layers, the codebase is organized by feature:
 - When changing repository method signatures, immediately check and update all test mocks that reference the old signature
 - When fixing one test, run the full suite — fixes often break other tests via mock/cache interactions
 - Use `@MockitoBean` (not `@MockBean`) for Spring Boot 3.4.3+
-  Add under a ## Build & Run section near the top of CLAUDE.md.\n\n## Build & Run
+
+---
+
+## Build & Run
+
 - Build: `./mvnw clean verify`
-- Language: Java 25, Spring Boot 3.5.3
+- Language: Java 21, Spring Boot 3.4.3
 - Database: PostgreSQL (must be running before tests)
-- Ensure PostgreSQL is running before attempting test validation
-  Add under a ## Debugging Approach section in CLAUDE.md.\n\n## Debugging Approach
+
+---
+
+## Debugging Approach
+
 - When fixing a specific failing test, focus directly on that test first — do not investigate tangential issues (metrics, Prometheus, etc.) until the original issue is resolved
 - When a test returns an unexpected HTTP status, check exception handlers and validation interceptors before exploring caching or unrelated subsystems
+
 ---
 ## What NOT to Do
 

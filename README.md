@@ -7,28 +7,6 @@ FinGuard is a research platform that combines rule-based detection, machine lear
 
 ---
 
-## Screenshots
-
-### Landing Page
-![Landing page](docs/screenshots/landing.png)
-
-### Dashboard
-![Dashboard overview with charts and stats](docs/screenshots/dashboard.png)
-
-### Alerts
-![Alert list with risk scores and status](docs/screenshots/alerts.png)
-
-### Alert Detail
-![Single alert with transaction data and LLM explanation](docs/screenshots/alert-detail.png)
-
-### Run Detection
-![Detection pipeline configuration selector](docs/screenshots/detection.png)
-
-### Evaluation
-![Experiment results comparing all 5 configurations](docs/screenshots/evaluation.png)
-
----
-
 ## The 5 Experimental Configurations
 
 | # | Name | Description |
