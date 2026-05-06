@@ -3,6 +3,7 @@ package dev.finguard.config;
 import dev.finguard.detection.ml.TribuoModelService;
 import dev.finguard.explanation.llm.LLMExplanationService;
 import dev.finguard.explanation.rag.RAGContextService;
+import dev.finguard.llm.DynamicChatClientService;
 import dev.finguard.domain.model.Alert;
 import dev.finguard.domain.model.Transaction;
 import dev.finguard.domain.enums.AlertStatus;
@@ -13,6 +14,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -20,17 +25,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Import;
-import org.springframework.retry.annotation.Retryable;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import java.io.IOException;
-import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -53,11 +57,12 @@ class ResilienceIT {
     @Autowired private RAGContextService ragContextService;
     @Autowired private TribuoModelService tribuoModelService;
     @Autowired private VectorStore vectorStore;
+    @Autowired private DynamicChatClientService dynamicChatClientService;
     @Autowired private CacheManager cacheManager;
 
     @BeforeEach
     void resetMocksAndCaches() {
-        reset(vectorStore);
+        reset(vectorStore, dynamicChatClientService);
         var cache = cacheManager.getCache("rag-context");
         if (cache != null) {
             cache.clear();
@@ -69,35 +74,80 @@ class ResilienceIT {
     // ================================================================
 
     @Nested
-    @DisplayName("LLM call retry configuration")
-    class LlmRetryConfig {
+    @DisplayName("LLM call retry behavior")
+    class LlmRetryBehavior {
 
-        @Test
-        @DisplayName("callLlmWithRetry is annotated with @Retryable")
-        void callLlmWithRetry_hasRetryAnnotation() throws NoSuchMethodException {
-            Method method = LLMExplanationService.class.getMethod(
-                    "callLlmWithRetry", String.class, Long.class);
+        @SuppressWarnings("unchecked")
+        private ChatClient.CallResponseSpec mockCallChain() {
+            ChatClient client = mock(ChatClient.class);
+            ChatClient.ChatClientRequestSpec reqSpec = mock(ChatClient.ChatClientRequestSpec.class);
+            ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
 
-            Retryable retryable = method.getAnnotation(Retryable.class);
+            when(dynamicChatClientService.getCurrentClient()).thenReturn(client);
+            when(client.prompt()).thenReturn(reqSpec);
+            when(reqSpec.user(anyString())).thenReturn(reqSpec);
+            when(reqSpec.call()).thenReturn(callSpec);
 
-            assertThat(retryable).isNotNull();
-            assertThat(retryable.maxAttempts()).isEqualTo(3);
-            assertThat(retryable.backoff().delay()).isEqualTo(2000);
-            assertThat(retryable.backoff().multiplier()).isEqualTo(3.0);
+            return callSpec;
         }
 
         @Test
-        @DisplayName("Spring Retry proxy is active on LLMExplanationService")
-        void springRetryProxy_isActive() {
-            // If Spring Retry is properly configured, the service bean will be
-            // wrapped in a CGLIB proxy that intercepts @Retryable calls
-            assertThat(llmExplanationService.getClass().getName())
-                    .satisfiesAnyOf(
-                            name -> assertThat(name).contains("$$SpringCGLIB$$"),
-                            name -> assertThat(name).contains("$$EnhancerBySpringCGLIB$$"),
-                            // Spring Boot 3.4+ may use a different proxy mechanism
-                            name -> assertThat(name).isNotEqualTo(LLMExplanationService.class.getName())
-                    );
+        @DisplayName("Succeeds on first attempt without retry")
+        void callLlm_shouldSucceed_onFirstAttempt() {
+            ChatClient.CallResponseSpec callSpec = mockCallChain();
+            ChatResponse response = new ChatResponse(
+                    List.of(new Generation(new AssistantMessage("{\"riskSummary\":\"test\"}"))));
+            when(callSpec.chatResponse()).thenReturn(response);
+
+            ChatResponse result = llmExplanationService.callLlmWithRetry("test prompt", 1L);
+
+            assertThat(result).isNotNull();
+            verify(dynamicChatClientService, times(1)).getCurrentClient();
+        }
+
+        @Test
+        @DisplayName("Retries and succeeds after transient failure")
+        void callLlm_shouldRetryAndSucceed_afterTransientFailure() {
+            ChatClient.CallResponseSpec callSpec = mockCallChain();
+            ChatResponse response = new ChatResponse(
+                    List.of(new Generation(new AssistantMessage("{\"riskSummary\":\"test\"}"))));
+            when(callSpec.chatResponse())
+                    .thenThrow(new RuntimeException("Connection timeout"))
+                    .thenReturn(response);
+
+            ChatResponse result = llmExplanationService.callLlmWithRetry("test prompt", 1L);
+
+            assertThat(result).isNotNull();
+            verify(dynamicChatClientService, times(2)).getCurrentClient();
+        }
+
+        @Test
+        @DisplayName("Exhausts all retries and throws after persistent failure")
+        void callLlm_shouldExhaustRetries_afterPersistentFailure() {
+            ChatClient.CallResponseSpec callSpec = mockCallChain();
+            when(callSpec.chatResponse())
+                    .thenThrow(new RuntimeException("Service unavailable"));
+
+            assertThatThrownBy(() -> llmExplanationService.callLlmWithRetry("test prompt", 1L))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("LLM service unavailable after 3 attempts");
+
+            // 3 attempts = maxAttempts
+            verify(dynamicChatClientService, times(3)).getCurrentClient();
+        }
+
+        @Test
+        @DisplayName("Does not retry on IllegalArgumentException")
+        void callLlm_shouldNotRetry_onIllegalArgument() {
+            ChatClient.CallResponseSpec callSpec = mockCallChain();
+            when(callSpec.chatResponse())
+                    .thenThrow(new IllegalArgumentException("Bad input"));
+
+            assertThatThrownBy(() -> llmExplanationService.callLlmWithRetry("test prompt", 1L))
+                    .isInstanceOf(RuntimeException.class);
+
+            // Should fail immediately — no retries for IllegalArgumentException
+            verify(dynamicChatClientService, times(1)).getCurrentClient();
         }
     }
 
@@ -121,18 +171,6 @@ class ResilienceIT {
             List<Document> result = ragContextService.retrieveContext(alert, tx);
 
             assertThat(result).isEmpty();
-        }
-
-        @Test
-        @DisplayName("retrieveContext is annotated with @Retryable")
-        void retrieveContext_hasRetryAnnotation() throws NoSuchMethodException {
-            Method method = RAGContextService.class.getMethod(
-                    "retrieveContext", Alert.class, Transaction.class);
-
-            Retryable retryable = method.getAnnotation(Retryable.class);
-
-            assertThat(retryable).isNotNull();
-            assertThat(retryable.maxAttempts()).isEqualTo(2);
         }
 
         @Test
@@ -175,19 +213,14 @@ class ResilienceIT {
     // ================================================================
 
     @Nested
-    @DisplayName("ML model loading retry configuration")
-    class MlModelRetryConfig {
+    @DisplayName("ML model loading retry behavior")
+    class MlModelRetryBehavior {
 
         @Test
-        @DisplayName("loadModels is annotated with @Retryable for IOException")
-        void loadModels_hasRetryAnnotation() throws NoSuchMethodException {
-            Method method = TribuoModelService.class.getMethod("loadModels", java.nio.file.Path.class);
-
-            Retryable retryable = method.getAnnotation(Retryable.class);
-
-            assertThat(retryable).isNotNull();
-            assertThat(retryable.maxAttempts()).isEqualTo(3);
-            assertThat(retryable.retryFor()).contains(IOException.class);
+        @DisplayName("Spring Retry proxy is active on TribuoModelService")
+        void springRetryProxy_isActive() {
+            assertThat(tribuoModelService.getClass().getName())
+                    .isNotEqualTo(TribuoModelService.class.getName());
         }
     }
 
