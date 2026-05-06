@@ -125,11 +125,18 @@ public class IngestionController {
         }
 
         // Reject path traversal attempts
-        Path candidate = Path.of(filePath);
+        Path candidate = Path.of(filePath).normalize();
         for (Path component : candidate) {
             if ("..".equals(component.toString())) {
                 throw new BadRequestException("Path traversal is not allowed");
             }
+        }
+
+        // Reject sensitive system paths
+        String normalized = candidate.toString();
+        if (normalized.startsWith("/proc/") || normalized.startsWith("/sys/")
+                || normalized.startsWith("/etc/") || normalized.startsWith("/dev/")) {
+            throw new BadRequestException("Access to system paths is not allowed");
         }
 
         if (!Files.exists(candidate)) {
