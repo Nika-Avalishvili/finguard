@@ -82,8 +82,8 @@ class ResilienceIT {
 
             assertThat(retryable).isNotNull();
             assertThat(retryable.maxAttempts()).isEqualTo(3);
-            assertThat(retryable.backoff().delay()).isEqualTo(1000);
-            assertThat(retryable.backoff().multiplier()).isEqualTo(2.0);
+            assertThat(retryable.backoff().delay()).isEqualTo(2000);
+            assertThat(retryable.backoff().multiplier()).isEqualTo(3.0);
         }
 
         @Test

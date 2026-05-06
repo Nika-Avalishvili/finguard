@@ -79,6 +79,9 @@ class DetectionPipelineConcurrencyIT {
     @MockitoBean
     private LLMExplanationService llmExplanationService;
 
+    @Autowired
+    private dev.finguard.detection.rule.RuleThresholdService ruleThresholdService;
+
     @BeforeEach
     void cleanUp() {
         explanationRepository.deleteAll();
@@ -86,6 +89,11 @@ class DetectionPipelineConcurrencyIT {
         featuresRepository.deleteAll();
         transactionRepository.deleteAll();
         reset(mlService, llmExplanationService);
+        // Pin thresholds to paper defaults so test fixture amounts (500k) trigger rules.
+        // DB seeds thesis-calibrated values (1M for LARGE_TRANSACTION) which are too high.
+        for (var rule : dev.finguard.detection.rule.RuleMetadata.values()) {
+            ruleThresholdService.updateThreshold(rule.name(), rule.getPaperDefault());
+        }
     }
 
     // ==============================================================

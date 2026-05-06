@@ -400,6 +400,7 @@ class DetectionControllerIT {
         tx.setDatasetSource(DatasetSource.PAYSIM);
         tx.setExternalId("DET-" + System.nanoTime());
         tx.setIsFraud(isFraud);
+        tx.setIsTrainingSet(false);
         return transactionRepository.save(tx);
     }
 
